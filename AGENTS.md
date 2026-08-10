@@ -111,16 +111,3 @@ unrelated to each other and to the package version in `pyproject.toml`.
   just different data), or exist to document distinct, differently-named
   scenarios, leave them as separate functions. A few similar-looking lines is
   not the same as substantially similar tests.
-
-## Git Commits
-
-- **Do** make commits at reasonable checkpoints for well-defined/planned pieces
-  of work
-- **Don't** push commits (user will push manually)
-- **Don't** commit ad-hoc conversational changes without being asked
-- Only commit when the work is complete, validated, and represents a logical
-  unit of change
-- **Use [Conventional Commits](https://www.conventionalcommits.org/)** for
-  commit messages (e.g. `feat: ...`, `fix: ...`, `docs: ...`, `chore: ...`)
-
-
