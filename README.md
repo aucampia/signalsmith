@@ -219,4 +219,5 @@ task cli             # Run CLI locally
 
 ## License
 
-UNLICENSED
+This project is dedicated to the public domain under
+[CC0 1.0 Universal](./LICENSE).
