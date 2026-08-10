@@ -82,3 +82,17 @@ def test_process_cycle_returns_stats_with_found_count(tmp_path: Path) -> None:
     stats = process_cycle(ctx, notifications=ctx.provider.get_notifications())
 
     assert stats.found == 1
+
+
+def test_process_cycle_reaps_using_fetched_notifications_when_omitted(
+    tmp_path: Path,
+) -> None:
+    """Regression test: omitting `notifications` must not reap against an
+    empty set (which would wipe every spool entry) - it should fetch from
+    the provider and reap using that list, same as when passed explicitly."""
+    ctx = _make_ctx(tmp_path, [_notification()])
+    ctx.spool.reap = MagicMock(wraps=ctx.spool.reap)  # type: ignore[method-assign]
+
+    process_cycle(ctx)
+
+    ctx.spool.reap.assert_called_once_with("github", {"1"})

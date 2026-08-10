@@ -31,6 +31,11 @@ def process_cycle(
     loop iteration) so the two commands share the same per-cycle behavior
     rather than duplicating it.
     """
+    if notifications is None:
+        notifications = ctx.provider.get_notifications(
+            limit=limit, refresh=refresh_notifications
+        )
+
     stats = RunStats()
     actions = create_actions(
         ctx.config,
@@ -48,9 +53,7 @@ def process_cycle(
     )
     execute_actions(actions, dry_run=dry_run, stats=stats)
     if not dry_run and limit is None:
-        removed = ctx.spool.reap(
-            ctx.provider.name, {n.id for n in (notifications or [])}
-        )
+        removed = ctx.spool.reap(ctx.provider.name, {n.id for n in notifications})
         logger.info("Reaped %d spool entries no longer in the unread feed", removed)
     elif dry_run:
         print("[DRY RUN] Would reap spool entries no longer in the unread feed")
