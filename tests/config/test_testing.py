@@ -62,6 +62,11 @@ from signalsmith.versioning import VersionError
             "some-team",
         ),
         ("no templates here", {}, "no templates here"),
+        (
+            "{{ a }}{{ b }}",
+            {"a": "x", "b": "y"},
+            "xy",
+        ),
     ],
     ids=[
         "whole-value",
@@ -69,6 +74,7 @@ from signalsmith.versioning import VersionError
         "dotted-path-org",
         "dotted-path-id",
         "passthrough",
+        "adjacent-expressions-not-misread-as-one",
     ],
 )
 def test_resolve_config_templates(

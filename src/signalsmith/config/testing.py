@@ -176,12 +176,22 @@ def resolve_config_templates(obj: Any, scope: dict[str, Any]) -> Any:
     value, keeping its real type (dict/list/scalar/bool) via
     `templating.evaluate`. A `{{ expr }}` embedded in a longer string is
     rendered to text instead, same as a `notice`/`notify` template.
+
+    A string merely *starting* with `{{` and *ending* with `}}` isn't
+    necessarily a single expression - e.g. "{{ a }}{{ b }}" matches that
+    shape but is two adjacent templates, not one. Whole-expression
+    evaluation is tried first; a `TemplateSyntaxError` there means the
+    assumption was wrong, so it falls back to rendering the whole string as
+    a template instead of raising.
     """
     if isinstance(obj, str):
         whole_match = _WHOLE_EXPRESSION_RE.fullmatch(obj)
         try:
             if whole_match:
-                return templating.evaluate(whole_match.group(1).strip(), scope)
+                try:
+                    return templating.evaluate(whole_match.group(1).strip(), scope)
+                except jinja2.TemplateSyntaxError:
+                    pass
             if "{{" in obj:
                 return templating.ENV.from_string(obj).render(scope)
         except jinja2.TemplateError as exc:

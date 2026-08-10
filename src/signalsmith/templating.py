@@ -116,7 +116,11 @@ def evaluate(source: str, context: Mapping[str, Any]) -> Any:
     """
     result = compile_expression(source)(**context)
     if isinstance(result, jinja2.Undefined):
-        result._fail_with_undefined_error()
+        # StrictUndefined raises on `str()` (its `__str__` is the same
+        # `_fail_with_undefined_error` hook `__bool__`/`__iter__` use) - this
+        # forces that through the public dunder path rather than calling the
+        # private method directly.
+        str(result)
     return result
 
 
