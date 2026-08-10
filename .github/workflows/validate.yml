@@ -1,0 +1,46 @@
+name: Validate
+on:
+  workflow_dispatch: {}
+  pull_request:
+    branches:
+      - main
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+env:
+  __DEVTOOLS_CACHE_DIR: ${{ github.workspace }}/.cache/devtools
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Cache devtools state (tools, python, lint/test caches)
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.__DEVTOOLS_CACHE_DIR }}
+          # restore-keys only match as a literal prefix of a saved key, so
+          # the key is built from one hashFiles() call per file (not one
+          # hashFiles() over several files, which produces a single opaque
+          # hash no prefix can partially match) - ordered from least to most
+          # frequently changing, so each restore-keys tier below is a valid
+          # prefix of a broader, still-useful cache.
+          key: devtools-${{ github.job }}-v1-${{ hashFiles('.mise.toml') }}-${{ hashFiles('mise.lock') }}-${{ hashFiles('pyproject.toml') }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            devtools-${{ github.job }}-v1-${{ hashFiles('.mise.toml') }}-${{ hashFiles('mise.lock') }}-${{ hashFiles('pyproject.toml') }}-
+            devtools-${{ github.job }}-v1-${{ hashFiles('.mise.toml') }}-${{ hashFiles('mise.lock') }}-
+            devtools-${{ github.job }}-v1-${{ hashFiles('.mise.toml') }}-
+            devtools-${{ github.job }}-v1-
+      - name: Run validation
+        run: |
+          set -x -Eeuo pipefail
+          docker compose --progress quiet run --rm devtools task configure validate
+          sudo chown -R "$(id -u):$(id -g)" .
+        env:
+          # mise needs this for GitHub API calls (tool version resolution,
+          # uv's artifact attestation check) or it hits the unauthenticated
+          # rate limit almost immediately.
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"

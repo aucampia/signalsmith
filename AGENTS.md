@@ -23,12 +23,26 @@ don't care about, and alerts only on what matters.
 
 - `uv` for dependency management
 - `task` as task runner (see Taskfile.yml)
+- `mise` (`.mise.toml`) pins the non-Python CLI tools `task` itself relies
+  on plus `uv`: `task`, `yamlfmt`, `shfmt`, `shellcheck`, `uv`. `task
+  configure` runs `mise install` before `uv sync`. `mise.lock` (kept
+  up to date automatically, `[settings] lockfile = true`) additionally pins
+  the exact checksum/URL per tool+platform, on top of the exact versions
+  already pinned in `.mise.toml`.
+- `docker-compose.yaml` provides a containerized version of the same
+  toolchain, no custom image needed — the `devtools` service runs the
+  public `ghcr.io/jdx/mise` image with `entrypoint: ["mise", "exec", "--"]`,
+  which installs whatever `.mise.toml` declares on demand
+  (`docker compose run --rm devtools task configure validate`) — used by CI
+  (`.github/workflows/validate.yml`) and optionally by contributors who
+  don't want to install `mise`/`uv` locally.
 
 ## Quick Commands
 
-- `task configure` — Install dependencies
+- `task configure` — Install dependencies (mise-managed tools + uv deps)
 - `task validate:fix` — Auto-fix formatting and linting
-- `task validate:static` — Type checking, linting (mypy, ruff, codespell)
+- `task validate:static` — Type checking, linting (mypy, ruff, codespell,
+  yamlfmt, shfmt, shellcheck)
 - `task test` — Run pytest with coverage
 - `task validate` — Full validation pipeline (fix + static + test)
 

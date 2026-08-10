@@ -1,0 +1,13 @@
+[settings]
+# Pin exact checksums/URLs per tool+platform in mise.lock (kept up to date
+# automatically by `mise install`/`mise up`), on top of the exact versions
+# already pinned below - same supply-chain-pinning discipline as the
+# digest-pinned Docker images and SHA-pinned GitHub Actions in this repo.
+lockfile = true
+
+[tools]
+task = "3.52.0"
+yamlfmt = "0.21.0"
+shfmt = "3.13.1"
+shellcheck = "0.11.0"
+uv = "0.12.3"

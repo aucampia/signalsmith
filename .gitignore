@@ -222,3 +222,6 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# mise - personal overrides, not meant to be committed
+.mise.local.toml
