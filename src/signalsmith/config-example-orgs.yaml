@@ -1,0 +1,42 @@
+# Example configuration with organization filtering
+
+# Config file schema version (see AGENTS.md for the versioning policy)
+version: '1.1'
+
+renotify_interval: 3600
+poll_interval: 300
+
+# Default action for unmatched notifications (default: notify)
+default_action: notify
+
+# Organization masks - filter notifications in the processor
+# All notifications are fetched first, then filtered by organization
+masks:
+  orgs:
+    # Only process notifications from these organizations
+    # Organizations are matched against the owner/org part of repository.full_name
+    include:
+      - my-organization
+      - another-organization
+
+    # Or exclude specific organizations (mutually exclusive with include)
+    # exclude:
+    #   - spam-org
+
+actions:
+  notify-default:
+    notify:
+      title: '${notification.reason} ${notification.subject.type} ${notification.subject.title}'
+      message: '...'
+
+  ignore-silently:
+    ignore: {}
+
+rules:
+  - id: direct
+    expression: 'notification.subject.type in ["Issue", "PullRequest"]'
+    subject_expression: >
+      subject.assignees.exists(a, a.login == account.github.username)
+      || (has(subject.requested_reviewers) ? subject.requested_reviewers.exists(r, r.login == account.github.username) : false)
+    action:
+      ref: notify-default

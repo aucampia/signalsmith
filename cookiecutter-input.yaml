@@ -1,0 +1,16 @@
+default_context:
+  _commit: d49317af49b08fe76e883523c546258f797b587a
+  build_tool: go-task
+  cli_name: signalsmith
+  git_commit: y
+  git_init: y
+  project_dirname: signalsmith
+  project_name: signalsmith
+  project_short_description: signalsmith
+  project_url: https://example.com/project
+  python_package_fqname: signalsmith
+  python_version: '3.14'
+  sdpx_license_identifier: UNLICENSED
+  use_oci_devtools: n
+  variant: minimal
+  version: 0.0.0

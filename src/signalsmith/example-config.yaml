@@ -1,0 +1,87 @@
+# Example configuration for signalsmith
+# Place this at ${XDG_CONFIG_HOME}/signalsmith/config.yaml
+# (typically ~/.config/signalsmith/config.yaml)
+# Or set SIGNALSMITH_CONFIG=/path/to/your/config.yaml
+
+# Config file schema version (see AGENTS.md for the versioning policy)
+version: '1.1'
+
+# Seconds between re-notifications for persistent unread items (default: 3600)
+renotify_interval: 3600
+
+# Seconds between polls in daemon mode (default: 300)
+poll_interval: 300
+
+# Default action for notifications that don't match any rule (default: notify)
+# Options:
+#   - "notify": Send desktop notification for unmatched items (alert-by-default approach)
+#   - "ignore": Silently ignore unmatched items (whitelist approach, only alert on matched rules)
+default_action: notify
+
+rules:
+  # Notify on issue mentions
+  - id: 'issue_mention'
+    expression: 'notification.subject.type == "Issue" && notification.reason == "mention"'
+    action:
+      notify:
+        title: 'GitHub Issue Mention'
+        message: 'You were mentioned in: ${notification.subject.title}'
+
+  # Notify on issues assigned to you (two-stage filtering with subject fetch)
+  - id: 'issue_assigned_to_me'
+    expression: 'notification.subject.type == "Issue"'
+    subject_expression: 'subject.assignees.exists(a, a.login == account.github.username)'
+    action:
+      notify:
+        title: 'Issue Assigned to You'
+        message: 'You were assigned: ${notification.subject.title}'
+
+  # Notify on PR review requests where you're specifically requested (two-stage filtering)
+  - id: 'pr_review_requested_to_me'
+    expression: 'notification.subject.type == "PullRequest" && notification.reason == "review_requested"'
+    subject_expression: 'subject.requested_reviewers.exists(r, r.login == account.github.username)'
+    action:
+      notify:
+        title: 'PR Review Request'
+        message: 'Review requested: ${notification.subject.title}'
+
+  # Ignore draft PRs (two-stage filtering) - no alert, stays unread
+  - id: 'draft_pr_ignore'
+    expression: 'notification.subject.type == "PullRequest"'
+    subject_expression: 'subject.draft == true'
+    action:
+      ignore: {}
+
+  # Notify on PR review requests (generic fallback)
+  - id: 'pr_review_request'
+    expression: 'notification.subject.type == "PullRequest" && notification.reason == "review_requested"'
+    action:
+      notify:
+        title: 'GitHub PR Review Request'
+        message: 'Review requested: ${notification.subject.title} in ${notification.repository.full_name}'
+
+  # Ignore noisy repositories - no alert, stays unread
+  - id: 'noisy_repo_ignore'
+    expression: 'notification.repository.full_name == "my-org/noisy-repo"'
+    action:
+      ignore: {}
+
+  # Mark CI activity as read - no alert, marked as read on GitHub
+  - id: 'ci_activity_dismiss'
+    expression: 'notification.reason == "ci_activity"'
+    action:
+      mark_as_read: {}
+
+  # Notify on all other PR notifications
+  - id: 'pr_other'
+    expression: 'notification.subject.type == "PullRequest"'
+    action:
+      notify:
+        title: 'GitHub PR Notification'
+        message: '${notification.reason}: ${notification.subject.title}'
+
+  # Mark release notifications as read - completely dismiss from GitHub
+  - id: 'release_dismiss'
+    expression: 'notification.subject.type == "Release"'
+    action:
+      mark_as_read: {}

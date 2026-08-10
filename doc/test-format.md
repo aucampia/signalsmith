@@ -1,0 +1,86 @@
+# Test File Format
+
+Filter rules can be tested offline (no GitHub API calls, no token) by writing YAML test files under a `tests/` directory: `<test dir>/*.yaml` (e.g. `~/.config/signalsmith/tests/spam-bots.yaml`). `<test dir>` is resolved independently of the config file's location (checked in order): the `--tests-dir` CLI flag, the `SIGNALSMITH_TEST_DIR` environment variable, or `<config dir>/tests` (see [config.md](./config.md) for how `<config dir>` is resolved). Run them with `signalsmith test`.
+
+Each file holds a list of `cases`. A case's `input:` block supplies a *partial* `notification` (and optional partial `subject`/`account`) — only the fields the rule under test cares about; the rest are filled in from built-in defaults. An `input:` block can also be set at the file level as shared defaults that every case's `input:` deep-merges over. An `expect` block names the rule that should win:
+
+```yaml
+version: '1.0'                    # required, test file schema version (see doc/config.md#versioning)
+
+input:                            # optional, file-level defaults for every case
+  account:
+    github: { username: someuser }
+
+cases:
+  - name: bot PRs are marked as read
+    parameters: ${variables.spam_bots}   # parameterize over a config variables.* list
+    input:
+      notification:
+        subject:
+          type: PullRequest
+      subject:
+        user:
+          login: ${parameter}            # current item from `parameters`
+    expect:
+      rule: bot_pr_mark_as_read
+      action: mark_as_read               # optional cross-check
+
+  - name: closed PRs are marked as read
+    parameters: [closed, merged]         # or an inline list
+    input:
+      notification:
+        subject:
+          type: PullRequest
+      subject:
+        state: ${parameter}
+    expect:
+      rule: closed_pr_mark_as_read
+
+  - name: unrelated issue notifies by default
+    input:
+      notification:
+        subject:
+          type: Issue
+    expect:
+      rule: null      # asserts *no* rule matches
+      action: notify
+
+  - name: rule id varies by parameter
+    parameters:
+      - { prefix: 'grc-', rule: off_topic_mark_as_read }
+      - { prefix: 'my-team-', rule: reviewer_or_assignee }
+    input:
+      notification:
+        repository:
+          full_name: 'myorg/${parameter.prefix}repo'
+    expect:
+      rule: ${parameter.rule}   # expect.rule/expect.action can reference `parameter` too
+```
+
+## Test Case Structure
+
+- **`version`** (required, file-level) — the test file's schema version (`MAJOR.MINOR`, e.g. `'1.0'`). An incompatible version refuses to run the file; see [Versioning](./config.md#versioning) for the compatibility rules and bump policy.
+- **`expect.rule`** — id of the rule expected to be the first match; `null` asserts that *no* rule matches (falling through to `default_action`).
+- **`expect.action`** (optional) — cross-checks the resulting `notify`/`mark_as_read`/`ignore` action, catching a case where the right *action* happens via the wrong rule.
+- Both `expect.rule` and `expect.action` support the same `${...}` templating as `input.notification`/`input.subject` (see the last example above) — useful when one parameterized case exercises more than one rule.
+- **`parameters`** — either an inline YAML list, or a `${variables.some_list}` reference resolved from the config's `variables:` block. The case runs once per item, with `${parameter}` bound to the current item (`${parameter.field}` for object items, e.g. `spam_groups`). Omit `parameters` to run the case once, unparameterized.
+- **`${...}` templating** — a value that is *exactly* `${expr}` is replaced with the resolved value's real type (list/dict/scalar); a `${expr}` embedded in a longer string is interpolated as text. Available references: `parameter`, `variables` (from config), `account`.
+- **`input.account`** — optional, at file level and/or per case; case-level `input` deep-merges over file-level `input`, which deep-merges over the built-in default `{github: {username: testuser}}`. Needed for rules using `account.github.username`.
+- **`input`** at file level sets defaults shared by every case; a case's own `input` is deep-merged over those defaults, so a case only needs to state what it changes.
+- Partial `input.notification`/`input.subject` values are deep-merged over an internal default skeleton that satisfies all required model fields, so a case only needs to set what the rule actually inspects.
+
+Note: when writing YAML flow-style mappings (`{ key: value }`), an unquoted `${...}` value breaks the parser, because `{` is a flow indicator there — quote it (`login: "${parameter}"`) or use block style instead.
+
+## Running Tests
+
+Run tests with:
+
+```bash
+signalsmith test
+```
+
+Options:
+- `--tests-dir PATH`: Directory of test files (default: `tests/` next to the config file).
+- `-k TEXT`: Only run cases whose name contains this substring.
+
+The command exits non-zero if any case fails, making it suitable for CI pipelines.

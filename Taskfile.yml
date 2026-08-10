@@ -1,0 +1,146 @@
+# https://taskfile.dev/usage/
+# https://pkg.go.dev/text/template
+# https://go-task.github.io/slim-sprig/
+# 
+version: "3"
+vars:
+  PYTHON: python3
+  RUN_PREFIX: "uv run"
+  RUN_PYTHON: "{{.RUN_PREFIX}} python"
+  PY_SOURCE: "src tests"
+tasks:
+  configure:
+    desc: Configure this project
+    cmds:
+      - "uv sync {{.CLI_ARGS}}"
+  update:
+    desc: Update dependencies
+    cmds:
+      - uv lock --upgrade {{.CLI_ARGS}}
+  update:ranges:
+    desc: Update dependency ranges
+    env:
+      SCRIPT: |
+        import re, subprocess, tomllib
+
+        def pkg_name(spec):
+            return re.split(r"[><=~!@;]", spec)[0]
+
+        with open("pyproject.toml", "rb") as f:
+            data = tomllib.load(f)
+
+        groups = []
+        deps = [pkg_name(d) for d in data.get("project", {}).get("dependencies", [])]
+        if deps:
+            groups.append((None, deps))
+        for group, pkgs in data.get("dependency-groups", {}).items():
+            group_deps = [pkg_name(p) for p in pkgs if isinstance(p, str)]
+            if group_deps:
+                groups.append((group, group_deps))
+
+        for group, pkgs in groups:
+            args = ["--group", group] if group else []
+            subprocess.run(["uv", "remove"] + args + pkgs, check=True)
+            subprocess.run(["uv", "add", "--bounds=major"] + args + pkgs, check=True)
+    cmds:
+      - uv run python -c "$SCRIPT"
+  ruff:format:
+    desc: Run ruff formatter
+    cmds:
+      - '{{.RUN_PREFIX}} ruff format --config pyproject.toml {{if (ne (.CHECK | default "false") "false")}}--check --diff {{end}}{{.CLI_ARGS | default .PY_SOURCE}}'
+  ruff:lint:
+    desc: Run ruff linter
+    cmds:
+      - '{{.RUN_PREFIX}} ruff check --config pyproject.toml {{if (mustFromJson (.FIX | default "false"))}}--fix-only {{end}}{{.CLI_ARGS | default .PY_SOURCE}}'
+  mypy:
+    desc: Run mypy
+    cmds:
+      - "{{.RUN_PYTHON}} -m mypy --show-error-context --show-error-codes {{.CLI_ARGS}}"
+  codespell:
+    desc: Run codespell
+    cmds:
+      - "{{.RUN_PREFIX}} codespell {{.CLI_ARGS | default .PY_SOURCE}}"
+  pip-audit:
+    desc: Run pip audit
+    cmds:
+      - |
+        uv export --all-groups --no-emit-project --format requirements.txt | \
+          {{.RUN_PYTHON}} -m pip_audit --requirement /dev/stdin --no-deps --strict --desc on
+  test:
+    desc: Run tests
+    cmds:
+      - "{{.RUN_PYTHON}} -m pytest {{.CLI_ARGS}}"
+  validate:static:
+    desc: Perform static validation
+    cmds:
+      - task: mypy
+      - task: codespell
+      - task: ruff:format
+        vars: {CHECK: "true"}
+      - task: ruff:lint
+        # - task: pip-audit
+  validate:fix:
+    desc: Fix auto-fixable validation errors.
+    cmds:
+      - task: ruff:lint
+        vars: {FIX: "true"}
+      - task: ruff:format
+  validate:
+    desc: Perform all validation
+    cmds:
+      - task: validate:static
+      - task: test
+  fix-and-validate:
+    desc: Perform all validation
+    cmds:
+      - task: validate:fix
+      - task: validate
+  uv:clean:
+    desc: Clean virtualenv
+    cmds:
+      - uv run --no-sync printenv VIRTUAL_ENV | xargs -t rm -rv
+  clean:
+    desc: Clean everything
+    cmds:
+      - task: _rimraf
+        vars: {RIMRAF_TARGET: ".mypy_cache"}
+      - task: _rimraf
+        vars: {RIMRAF_TARGET: ".pytest_cache"}
+      - task: _rimraf
+        vars: {RIMRAF_TARGET: ".venv"}
+      - task: uv:clean
+  default:
+    desc: Run validate
+    cmds:
+      - task: validate
+  uv:
+    desc: Run uv
+    cmds:
+      - "uv {{.CLI_ARGS}}"
+  cli:
+    desc: Run cli
+    cmds:
+      - "{{.RUN_PREFIX}} signalsmith {{.CLI_ARGS}}"
+  venv:run:
+    desc: Run args in the venv
+    cmds:
+      - "{{.RUN_PREFIX}} {{.CLI_ARGS}}"
+  venv:python:
+    desc: Run python in the venv
+    cmds:
+      - "{{.RUN_PYTHON}} {{.CLI_ARGS}}"
+  _rimraf:
+    # This task is a utility task for recursively removing directories, it is
+    # similar to rm -rf but not identical and it should work wherever there is
+    # a python interpreter. The name is inspired by
+    # <https://www.npmjs.com/package/rimraf>.
+    - cmd: |
+        {{.PYTHON}} -c '
+        from pathlib import Path;
+        import sys, shutil;
+        for path in sys.argv[1:]:
+          if Path(path).exists():
+            sys.stderr.write(f"removing {path}\n")
+            shutil.rmtree(path, ignore_errors=True)
+        ' {{.RIMRAF_TARGET}}
+# 
