@@ -57,7 +57,15 @@ signalsmith/
    ```bash
    task configure
    ```
-   This runs `uv sync` to install all dependencies including dev tools.
+   This runs `mise install` (fetches the pinned versions of `task`,
+   `yamlfmt`, `shfmt`, `shellcheck`, and `uv` from `.mise.toml`) and then
+   `uv sync` to install Python dependencies including dev tools.
+
+   Alternatively, run everything in the containerized devtools environment
+   (also what CI uses) without installing `mise`/`uv` locally:
+   ```bash
+   docker compose run --rm devtools task configure validate
+   ```
 
 ### Making Changes
 
@@ -82,6 +90,8 @@ Run these commands in order:
    - `mypy` - Type checking (strict mode)
    - `ruff check` - Linting
    - `codespell` - Spell checking
+   - `yamlfmt` - YAML formatting (CI/infra files only)
+   - `shfmt` / `shellcheck` - Shell script formatting and linting
 
 3. **Run tests:**
    ```bash
@@ -146,14 +156,23 @@ After adding dependencies, run `task configure` to update the lockfile.
 2. Commit your changes with a descriptive message
 3. Create a pull request with a clear description of what changed and why
 
+## Continuous Integration
+
+Pull requests against `main` are validated by the `Validate` GitHub Actions
+workflow (`.github/workflows/validate.yml`), which runs `task configure
+validate` inside the `devtools` container (see `docker-compose.yaml`) — the
+same command described in the Validation Workflow section above.
+
 ## Project Tooling
 
 - **Package manager:** uv (fast Python package installer)
 - **Build backend:** hatchling
 - **Task runner:** go-task (Taskfile.yml)
+- **Tool version pinning:** mise (`.mise.toml`) for `task`, `yamlfmt`,
+  `shfmt`, `shellcheck`, `uv`
 - **CLI framework:** Typer
 - **Data validation:** Pydantic v2, via `pydantic.dataclasses.dataclass` (not
   `BaseModel` — see AGENTS.md for the narrow exception and why)
 - **Testing:** pytest + pytest-cov
 - **Type checking:** mypy (strict mode)
-- **Linting/formatting:** ruff
+- **Linting/formatting:** ruff, yamlfmt, shfmt, shellcheck

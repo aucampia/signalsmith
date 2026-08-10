@@ -8,10 +8,14 @@ vars:
   RUN_PREFIX: "uv run"
   RUN_PYTHON: "{{.RUN_PREFIX}} python"
   PY_SOURCE: "src tests"
+  YAML_SOURCE: "Taskfile.yml docker-compose.yaml .github/workflows"
 tasks:
   configure:
     desc: Configure this project
     cmds:
+      # mise (task/yamlfmt/shfmt/shellcheck/uv) must be installed before uv
+      # itself can be invoked.
+      - "mise install"
       - "uv sync {{.CLI_ARGS}}"
   update:
     desc: Update dependencies
@@ -60,6 +64,26 @@ tasks:
     desc: Run codespell
     cmds:
       - "{{.RUN_PREFIX}} codespell {{.CLI_ARGS | default .PY_SOURCE}}"
+  yamlfmt:
+    desc: Run yamlfmt
+    cmds:
+      - 'mise exec -- yamlfmt {{if (ne (.CHECK | default "false") "false")}}-lint {{end}}{{.CLI_ARGS | default .YAML_SOURCE}}'
+  shfmt:
+    desc: Run shfmt (shell script formatter)
+    cmds:
+      - |
+        files=$(git -c safe.directory='*' ls-files -- '*.sh')
+        if [ -n "$files" ]; then
+          mise exec -- shfmt {{if (ne (.CHECK | default "false") "false")}}-l -d{{else}}-w{{end}} $files
+        fi
+  shellcheck:
+    desc: Run shellcheck
+    cmds:
+      - |
+        files=$(git -c safe.directory='*' ls-files -- '*.sh')
+        if [ -n "$files" ]; then
+          mise exec -- shellcheck $files
+        fi
   pip-audit:
     desc: Run pip audit
     cmds:
@@ -78,6 +102,11 @@ tasks:
       - task: ruff:format
         vars: {CHECK: "true"}
       - task: ruff:lint
+      - task: yamlfmt
+        vars: {CHECK: "true"}
+      - task: shfmt
+        vars: {CHECK: "true"}
+      - task: shellcheck
         # - task: pip-audit
   validate:fix:
     desc: Fix auto-fixable validation errors.
@@ -85,6 +114,8 @@ tasks:
       - task: ruff:lint
         vars: {FIX: "true"}
       - task: ruff:format
+      - task: yamlfmt
+      - task: shfmt
   validate:
     desc: Perform all validation
     cmds:
