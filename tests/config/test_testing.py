@@ -212,7 +212,7 @@ def test_build_subject_pull_request_override_merged() -> None:
     ("action", "expected_kind"),
     [
         (
-            RuleAction(notify=NotifyActionConfig(title="t", message="m")),
+            RuleAction(notify=NotifyActionConfig(title="t", body="m")),
             ActionKind.NOTIFY,
         ),
         (RuleAction(mark_as_read=MarkAsReadActionConfig()), ActionKind.MARK_AS_READ),
@@ -383,7 +383,7 @@ def test_run_case_uses_account_for_username_expressions() -> None:
                 id="reviewer_or_assignee",
                 expression='notification.subject.type == "PullRequest"',
                 subject_expression="subject.assignees.exists(a, a.login == account.github.username)",
-                action=RuleAction(notify=NotifyActionConfig(title="t", message="m")),
+                action=RuleAction(notify=NotifyActionConfig(title="t", body="m")),
             )
         ],
     )

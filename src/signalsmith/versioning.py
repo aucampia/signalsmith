@@ -79,9 +79,9 @@ class SchemaVersion:
 
 SCHEMA_VERSION_ADAPTER: TypeAdapter[SchemaVersion] = TypeAdapter(SchemaVersion)
 
-CONFIG_VERSION = SchemaVersion(major=1, minor=1)
+CONFIG_VERSION = SchemaVersion(major=2, minor=0)
 TEST_VERSION = SchemaVersion(major=1, minor=0)
-STATE_VERSION = SchemaVersion(major=1, minor=0)
+STATE_VERSION = SchemaVersion(major=2, minor=0)
 CACHE_VERSION = SchemaVersion(major=2, minor=0)
 
 MISSING_VERSION = SchemaVersion(major=0, minor=0)

@@ -16,7 +16,7 @@ resolves independently via `SIGNALSMITH_TEST_DIR`/`SIGNALSMITH_CONFIG_DIR`.
 
 ```yaml
 # Config file schema version (see Versioning below). Required.
-version: '1.1'
+version: '2.0'
 
 # Seconds between re-notifications for persistent unread items (default: 3600)
 renotify_interval: 3600
@@ -41,12 +41,17 @@ masks:
     # exclude:
     #   - spam-org
 
+# Generic notice computed for every notification (optional - see Notices and
+# Templates below). `notify` actions use this by default and can override
+# either field.
+notice:
+  title: '{{ notification.subject.type }}: {{ notification.subject.title }}'
+  body: '{{ notification.repository.full_name }} ({{ notification.reason }})'
+
 # Reusable action definitions, referenced from rules via action.ref (optional).
 actions:
   notify_default:
-    notify:
-      title: 'GitHub Notification'
-      message: '${notification.subject.title}'
+    notify: {}   # uses the generic notice above verbatim
 
 rules:
   - id: 'issue_mention'
@@ -54,7 +59,7 @@ rules:
     action:
       notify:
         title: 'GitHub Issue Mention'
-        message: 'You were mentioned in: ${notification.subject.title}'
+        body: 'You were mentioned in: {{ notification.subject.title }}'
 
   - id: 'issue_assigned_to_me'
     expression: 'notification.subject.type == "Issue"'
@@ -178,18 +183,65 @@ Filter rules can be tested offline without making any GitHub API calls. See [Tes
 3. Use `mark_as_read` when you want notifications completely dismissed from GitHub
 4. Switch to `default_action: ignore` when you prefer a whitelist approach (only alert on matched rules)
 
-## Message Templates
+## Notices and Templates
 
-`notify.message` and `notify.title` support `${...}` interpolation:
+Every `notify` action has a `title` and a `body`. Rather than write those out
+per rule, a top-level `notice:` block computes a generic notice for **every**
+notification, and `notify` actions build on it:
 
-- **`${notification.id}`**: Notification thread ID
-- **`${notification.reason}`**: e.g. `mention`, `assign`, `review_requested`
-- **`${notification.subject.title}`**: Issue/PR title
-- **`${notification.subject.type}`**: `Issue`, `PullRequest`, `Release`, …
-- **`${notification.subject.web_url}`**: Browser URL for the subject (Issue/PR), or empty if unavailable. This is the same URL used for click-to-open in `signalsmith daemon` (see [Clicking and Interactive Notifications](#clicking-and-interactive-notifications)) - useful in the message body as a fallback for `signalsmith run`, which never supports clicking.
-- **`${notification.repository.name}`**: Repository name
-- **`${notification.repository.full_name}`**: `owner/repo`
-- **`${notification.updated_at}`**: ISO-8601 timestamp
+```yaml
+notice:
+  title: '{{ notification.subject.type }}: {{ notification.subject.title }}'
+  body: '{{ notification.repository.full_name }} ({{ notification.reason }})'
+
+rules:
+  - id: 'reviewer_or_assignee'
+    expression: '...'
+    action:
+      notify: {}   # uses the generic notice verbatim
+
+  - id: 'urgent'
+    expression: '...'
+    action:
+      notify:
+        title: '[urgent] {{ notice.title }}'
+        # body omitted -> falls back to the rendered notice.body
+```
+
+`notice.title`/`notice.body` are both optional and independently default to
+the built-in strings shown above. A `notify` action's `title`/`body` are also
+optional and independently default to the rendered `notice.title`/
+`notice.body` - so `notify: {}` is a complete, valid action.
+
+Templates are [Jinja](https://jinja.palletsprojects.com/) - `{{ ... }}` for
+values, `{% if %}`/`{% for %}` etc. for logic. Available names depend on which
+template you're writing:
+
+- **`notice.title`/`notice.body`**: `notification`, `subject` (only if some
+  rule's `subject_expression` already fetched one, or a template here
+  references `subject` and it's fetchable - see below), `account`, `variables`
+  - same objects `expression`/`subject_expression` see (above), plus
+  `notification.subject.web_url` and `notification.repository.org`, which
+  aren't available in CEL expressions.
+- **`notify.title`/`notify.body`**: all of the above, **plus `notice`**
+  (`notice.title`, `notice.body`) - the already-rendered generic notice.
+
+**On-demand subject fetch**: if a `notice`/`notify` template references
+`subject` and no rule already fetched one while matching, signalsmith fetches
+it before rendering (same cache as `subject_expression`). A config whose
+templates never mention `subject` never pays for that extra fetch.
+
+**Failure handling**: a template that fails to render (an undefined
+reference, a typo) falls back rather than dropping the notification -
+`notice.title`/`notice.body` fall back to the built-in default strings above;
+`notify.title`/`notify.body` fall back to the rendered `notice`. Two cases:
+
+- The subject genuinely isn't available (its type has nothing fetchable, e.g.
+  `Release`, or the fetch failed) - logged at **warning**, since nothing is
+  wrong with the config. Guard for this explicitly if you want different
+  behavior: `{% if subject is defined %}{{ subject.user.login }}{% endif %}`.
+- Any other template error (a typo, an undefined variable, bad syntax) -
+  logged at **error**, since this is a genuine config problem worth fixing.
 
 ## Clicking and Interactive Notifications
 
@@ -224,7 +276,7 @@ If none of these are available, the tool will exit with an error suggesting to r
 Every notification that results in a `notify` action is written to a durable spool entry:
 
 - **Version marker**: `${XDG_DATA_HOME}/signalsmith/version.json` — see [Versioning](#versioning). Lives at the state root above the spool itself (not inside `spool.dir`, even if that's overridden), so it also covers any future state store added alongside the spool. Written automatically on first use; not user-editable.
-- **Live spool**: `${XDG_DATA_HOME}/signalsmith/spool/<provider>-<notification-id>.json` (e.g. `github-14523452.json`) — one JSON file per notified notification, containing the full notification, the fetched subject (if a rule's `subject_expression` fetched one; `null` otherwise), the matched rule, the rendered title/message, `received_at`/`last_notified_at`/`notify_count`, and a capped history of recent notify events. This also drives `renotify_interval`: the entry's `last_notified_at` replaces what used to be tracked in a separate `state.json`, so there's nothing else to keep in sync.
+- **Live spool**: `${XDG_DATA_HOME}/signalsmith/spool/<provider>-<notification-id>.json` (e.g. `github-14523452.json`) — one JSON file per notified notification, containing the full notification, the fetched subject (if a rule's `subject_expression` fetched one; `null` otherwise), the matched rule (as a plain JSON snapshot, not tied to the current config schema), the rendered title/body, `received_at`/`last_notified_at`/`notify_count`, and a capped history of recent notify events. This also drives `renotify_interval`: the entry's `last_notified_at` replaces what used to be tracked in a separate `state.json`, so there's nothing else to keep in sync.
 - Kept until the notification disappears from the provider's unread feed, at which point it's moved (not deleted) to the trash below. A notification `run`/`daemon` marks as read itself is *not* removed immediately — it lingers until the next full fetch confirms it's actually gone upstream.
 - Configurable location: `spool.dir` (default shown above).
 - Inspect with `signalsmith spool list`; reset with `signalsmith spool clean` (see [CLI Reference](./cli.md)).

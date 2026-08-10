@@ -1,7 +1,7 @@
 # Example configuration with reusable action definitions
 
 # Config file schema version (see AGENTS.md for the versioning policy)
-version: '1.1'
+version: '2.0'
 
 # Seconds between re-notifications for persistent unread items (default: 3600)
 renotify_interval: 3600
@@ -12,17 +12,22 @@ poll_interval: 300
 # Default action for unmatched notifications (default: notify)
 default_action: notify
 
-# Define reusable actions
+# Generic notice computed for every notification (Jinja templates - see
+# doc/config.md#notices-and-templates).
+notice:
+  title: '{{ notification.subject.type }}: {{ notification.subject.title }}'
+  body: 'Reason: {{ notification.reason }}'
+
+# Define reusable actions. `notify_pr`/`notify_issue` only override `title` -
+# `body` is left unset, so each falls back to the generic `notice.body` above.
 actions:
   notify_pr:
     notify:
-      title: 'PR: ${notification.subject.title}'
-      message: 'Reason: ${notification.reason}'
+      title: 'PR: {{ notification.subject.title }}'
 
   notify_issue:
     notify:
-      title: 'Issue: ${notification.subject.title}'
-      message: 'Reason: ${notification.reason}'
+      title: 'Issue: {{ notification.subject.title }}'
 
   ignore_silently:
     ignore: {}

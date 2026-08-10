@@ -64,7 +64,7 @@ def dispatcher(fake_notifier: FakeDesktopNotifier) -> Any:
 def test_send_calls_notifier_with_title_and_message(
     dispatcher: NotificationDispatcher, fake_notifier: FakeDesktopNotifier
 ) -> None:
-    dispatcher.send(RenderedNotification(title="Title", message="Message"))
+    dispatcher.send(RenderedNotification(title="Title", body="Message"))
     _wait_until(lambda: len(fake_notifier.sent) == 1)
 
     assert fake_notifier.sent[0]["title"] == "Title"
@@ -82,7 +82,7 @@ def test_click_opens_url(
     )
 
     dispatcher.send(
-        RenderedNotification(title="T", message="M", url="https://example.com/1")
+        RenderedNotification(title="T", body="M", url="https://example.com/1")
     )
     _wait_until(lambda: len(fake_notifier.sent) == 1)
 
@@ -101,7 +101,7 @@ def test_click_without_url_does_not_open_browser(
         "signalsmith.notify_dispatcher.webbrowser.open", lambda url: opened.append(url)
     )
 
-    dispatcher.send(RenderedNotification(title="T", message="M"))
+    dispatcher.send(RenderedNotification(title="T", body="M"))
     _wait_until(lambda: len(fake_notifier.sent) == 1)
 
     fake_notifier.sent[0]["on_clicked"]()
@@ -112,7 +112,7 @@ def test_click_without_url_does_not_open_browser(
 def test_click_resolves_pending_slot(
     dispatcher: NotificationDispatcher, fake_notifier: FakeDesktopNotifier
 ) -> None:
-    dispatcher.send(RenderedNotification(title="T", message="M"))
+    dispatcher.send(RenderedNotification(title="T", body="M"))
     _wait_until(lambda: len(fake_notifier.sent) == 1)
 
     assert dispatcher.wait_for_slot(max_concurrent=1, timeout=0.1) is False
@@ -125,8 +125,8 @@ def test_click_resolves_pending_slot(
 def test_wait_for_slot_blocks_until_dismissed(
     dispatcher: NotificationDispatcher, fake_notifier: FakeDesktopNotifier
 ) -> None:
-    dispatcher.send(RenderedNotification(title="T1", message="M"))
-    dispatcher.send(RenderedNotification(title="T2", message="M"))
+    dispatcher.send(RenderedNotification(title="T1", body="M"))
+    dispatcher.send(RenderedNotification(title="T2", body="M"))
     _wait_until(lambda: len(fake_notifier.sent) == 2)
 
     assert dispatcher.wait_for_slot(max_concurrent=2, timeout=0.1) is False
@@ -158,7 +158,7 @@ def test_send_passes_buttons_through(
         Button(title="Dismiss", on_pressed=lambda: pressed.append("dismiss"))
     ]
 
-    dispatcher.send(RenderedNotification(title="T", message="M"), buttons=buttons)
+    dispatcher.send(RenderedNotification(title="T", body="M"), buttons=buttons)
     _wait_until(lambda: len(fake_notifier.sent) == 1)
 
     sent_buttons = fake_notifier.sent[0]["buttons"]

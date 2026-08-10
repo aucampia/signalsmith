@@ -78,7 +78,7 @@ def test_record_notify_writes_provider_id_filename(
         rule=None,
         rule_id="__default__",
         title="Title",
-        message="Message",
+        body="Message",
     )
 
     assert (spool_dir / "github-123.json").exists()
@@ -97,20 +97,48 @@ def test_record_notify_populates_entry_fields(
         rule=rule,
         rule_id=rule.id,
         title="My Title",
-        message="My Message",
+        body="My Message",
     )
 
     ((_, entry),) = list(spool.entries())
     assert entry.provider == "github"
     assert entry.notification_id == "123"
     assert entry.rule_id == "my_rule"
-    assert entry.rule is not None and entry.rule.id == "my_rule"
+    assert entry.rule is not None and entry.rule["id"] == "my_rule"
     assert entry.title == "My Title"
-    assert entry.message == "My Message"
+    assert entry.body == "My Message"
     assert entry.subject is None
     assert entry.notification.id == "123"
     assert entry.received_at == entry.last_notified_at
     assert entry.notify_count == 1
+
+
+def test_record_notify_rule_round_trips_as_raw_dict(
+    tmp_path: Path, notification: GitHubNotification, rule: Rule
+) -> None:
+    """`SpoolEntry.rule` is a raw dict, decoupled from `config.models.Rule` -
+    it must round-trip through a write + reload without ever being validated
+    back into a `Rule` (see the comment on `SpoolEntry.rule`)."""
+    spool_dir = tmp_path / "spool"
+    trash_dir = tmp_path / "trash"
+    first = SpoolManager(spool_dir, trash_dir)
+    first.record_notify(
+        provider="github",
+        notification=notification,
+        subject=None,
+        subject_type=None,
+        rule=rule,
+        rule_id=rule.id,
+        title="Title",
+        body="Message",
+    )
+
+    reloaded = SpoolManager(spool_dir, trash_dir)
+    ((_, entry),) = list(reloaded.entries())
+
+    assert isinstance(entry.rule, dict)
+    assert entry.rule["id"] == "my_rule"
+    assert entry.rule["expression"] == "true"
 
 
 def test_record_notify_with_subject(
@@ -126,7 +154,7 @@ def test_record_notify_with_subject(
         rule=None,
         rule_id="__default__",
         title="Title",
-        message="Message",
+        body="Message",
     )
 
     ((_, entry),) = list(spool.entries())
@@ -148,7 +176,7 @@ def test_second_notify_preserves_received_at_and_bumps_count(
         rule=None,
         rule_id="__default__",
         title="Title 1",
-        message="Message 1",
+        body="Message 1",
     )
     ((_, first),) = list(spool.entries())
 
@@ -160,7 +188,7 @@ def test_second_notify_preserves_received_at_and_bumps_count(
         rule=None,
         rule_id="__default__",
         title="Title 2",
-        message="Message 2",
+        body="Message 2",
     )
     ((_, second),) = list(spool.entries())
 
@@ -184,7 +212,7 @@ def test_notify_events_capped_but_count_keeps_climbing(
             rule=None,
             rule_id="__default__",
             title=f"Title {i}",
-            message=f"Message {i}",
+            body=f"Message {i}",
         )
 
     ((_, entry),) = list(spool.entries())
@@ -210,7 +238,7 @@ def test_should_notify_false_within_renotify_interval(
         rule=None,
         rule_id="__default__",
         title="Title",
-        message="Message",
+        body="Message",
     )
 
     assert spool.should_notify("github", "123", 3600) is False
@@ -228,7 +256,7 @@ def test_should_notify_true_when_interval_elapsed(
         rule=None,
         rule_id="__default__",
         title="Title",
-        message="Message",
+        body="Message",
     )
 
     # renotify_interval of 0 seconds: always due immediately
@@ -249,7 +277,7 @@ def test_reload_from_disk_preserves_suppression(
         rule=None,
         rule_id="__default__",
         title="Title",
-        message="Message",
+        body="Message",
     )
 
     second = SpoolManager(spool_dir, trash_dir)
@@ -270,7 +298,7 @@ def test_reap_moves_absent_entries_to_trash(
         rule=None,
         rule_id="__default__",
         title="Title",
-        message="Message",
+        body="Message",
     )
 
     removed = spool.reap("github", live_ids=set())
@@ -295,7 +323,7 @@ def test_reap_keeps_live_entries(
         rule=None,
         rule_id="__default__",
         title="Title",
-        message="Message",
+        body="Message",
     )
 
     removed = spool.reap("github", live_ids={"123"})
@@ -316,7 +344,7 @@ def test_reap_ignores_other_providers(
         rule=None,
         rule_id="__default__",
         title="Title",
-        message="Message",
+        body="Message",
     )
 
     removed = spool.reap("github", live_ids=set())
@@ -340,7 +368,7 @@ def test_repeated_reap_of_same_id_does_not_collide_in_trash(
         rule=None,
         rule_id="__default__",
         title="First",
-        message="Message",
+        body="Message",
     )
     spool.reap("github", live_ids=set())
 
@@ -352,7 +380,7 @@ def test_repeated_reap_of_same_id_does_not_collide_in_trash(
         rule=None,
         rule_id="__default__",
         title="Second",
-        message="Message",
+        body="Message",
     )
     spool.reap("github", live_ids=set())
 
@@ -376,7 +404,7 @@ def test_clear_moves_everything_to_trash(
         rule=None,
         rule_id="__default__",
         title="Title",
-        message="Message",
+        body="Message",
     )
 
     removed = spool.clear()
@@ -412,7 +440,7 @@ def test_corrupt_spool_file_is_skipped_and_left_in_place(tmp_path: Path) -> None
 def test_ensure_state_version_fresh_dir_writes_marker(tmp_path: Path) -> None:
     state_dir = tmp_path / "state"
     SpoolManager.ensure_state_version(state_dir)
-    assert read_marker(state_dir) == SchemaVersion(major=1, minor=0)
+    assert read_marker(state_dir) == SchemaVersion(major=2, minor=0)
 
 
 def test_ensure_state_version_populated_dir_without_marker_raises(
@@ -442,7 +470,7 @@ def test_ensure_state_version_compatible_marker_passes(
     spool_dir = state_dir / "spool"
     spool_dir.mkdir(parents=True)
     (spool_dir / "github-1.json").write_text("{}")
-    write_marker(state_dir, SchemaVersion(major=1, minor=marker_minor))
+    write_marker(state_dir, SchemaVersion(major=2, minor=marker_minor))
     with caplog.at_level(logging.WARNING):
         SpoolManager.ensure_state_version(state_dir)
     assert any("newer" in record.message for record in caplog.records) == expect_warning

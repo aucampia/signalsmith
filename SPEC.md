@@ -64,9 +64,18 @@ Three layers, each usable (and testable) independently of the one above it:
   script, or eventually a different frontend without going through the CLI.
 - **Domain modules** — `processor` (fetch → org-mask → rule-match → action,
   see `cel_rules.RuleMatcher`), `actions` (turns a matched rule into an
-  executable `Action`), `state` (durable spool + permanent-ignore store),
-  `github` (the current `NotificationProvider` implementation), `config`
-  (the YAML schema and its offline test harness).
+  executable `Action`, rendering its notice via `templating` along the way),
+  `templating` (Jinja rendering of the top-level `notice:` block and a
+  `notify` action's `title`/`body` overrides), `state` (durable spool +
+  permanent-ignore store), `github` (the current `NotificationProvider`
+  implementation), `config` (the YAML schema and its offline test harness).
+
+Notice/notify rendering happens in `actions.registry._build_notify`, at
+action-construction time inside `processor.create_actions` - not lazily in
+`Action.execute()`. This is what lets `--dry-run` show the actual rendered
+title/body rather than raw notification fields, and what lets a `notify`
+template fetch a subject on demand (via `templating.template_names`) even
+when the matched rule's own `subject_expression` didn't need one.
 
 ### Extension point: adding an action kind
 

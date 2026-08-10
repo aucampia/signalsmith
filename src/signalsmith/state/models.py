@@ -5,7 +5,6 @@ from typing import Any
 from pydantic import TypeAdapter
 from pydantic.dataclasses import dataclass
 
-from ..config.models import Rule
 from ..github.models import GitHubNotification
 
 __all__: list[str] = []
@@ -18,7 +17,7 @@ class SpoolNotifyEvent:
     notified_at: datetime
     rule_id: str
     title: str
-    message: str
+    body: str
 
 
 @dataclass(kw_only=True)
@@ -37,9 +36,16 @@ class SpoolEntry:
     last_notified_at: datetime
     notify_count: int = 1
     rule_id: str
-    rule: Rule | None = None
+    # Raw JSON, not `config.models.Rule`: the spool is a durable record of
+    # what happened, not a config replica, and a `Rule` transitively embeds
+    # every action-kind config (see `NotifyActionConfig`) - tying spool
+    # schema compatibility to config schema compatibility, forcing a
+    # STATE_VERSION bump on every unrelated config change. Dumped via
+    # `signalsmith.config.models.RULE_ADAPTER` at write time (`spool.py`),
+    # never re-validated as a `Rule` on read.
+    rule: dict[str, Any] | None = None
     title: str
-    message: str
+    body: str
     web_url: str | None = None
     notification: GitHubNotification
     subject_type: str | None = None

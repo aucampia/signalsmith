@@ -23,7 +23,7 @@ def test_rule_matcher_matches_issue_mention() -> None:
             action=RuleAction(
                 notify=NotifyActionConfig(
                     title="Issue Mention",
-                    message="You were mentioned",
+                    body="You were mentioned",
                 )
             ),
         ),
@@ -54,7 +54,7 @@ def test_rule_matcher_no_match() -> None:
             action=RuleAction(
                 notify=NotifyActionConfig(
                     title="Issue Mention",
-                    message="You were mentioned",
+                    body="You were mentioned",
                 )
             ),
         ),
@@ -84,7 +84,7 @@ def test_rule_matcher_first_match_wins() -> None:
             action=RuleAction(
                 notify=NotifyActionConfig(
                     title="First",
-                    message="First match",
+                    body="First match",
                 )
             ),
         ),
@@ -120,9 +120,7 @@ def test_two_stage_filtering_with_subject_match() -> None:
             expression='notification.subject.type == "PullRequest"',
             subject_expression='subject.assignees.exists(a, a.login == "testuser")',
             action=RuleAction(
-                notify=NotifyActionConfig(
-                    title="PR Assigned", message="You were assigned"
-                )
+                notify=NotifyActionConfig(title="PR Assigned", body="You were assigned")
             ),
         ),
     ]
@@ -175,9 +173,7 @@ def test_two_stage_filtering_subject_no_match() -> None:
             expression='notification.subject.type == "PullRequest"',
             subject_expression='subject.assignees.exists(a, a.login == "testuser")',
             action=RuleAction(
-                notify=NotifyActionConfig(
-                    title="PR Assigned", message="You were assigned"
-                )
+                notify=NotifyActionConfig(title="PR Assigned", body="You were assigned")
             ),
         ),
     ]
@@ -225,9 +221,7 @@ def test_context_variable_available_in_expression() -> None:
         Rule(
             id="reason_matches_username",
             expression="notification.reason == account.github.username",
-            action=RuleAction(
-                notify=NotifyActionConfig(title="Match", message="Match")
-            ),
+            action=RuleAction(notify=NotifyActionConfig(title="Match", body="Match")),
         ),
     ]
     matcher = RuleMatcher(
@@ -258,9 +252,7 @@ def test_context_variable_available_in_subject_expression() -> None:
             expression='notification.subject.type == "PullRequest"',
             subject_expression="subject.assignees.exists(a, a.login == account.github.username)",
             action=RuleAction(
-                notify=NotifyActionConfig(
-                    title="PR Assigned", message="You were assigned"
-                )
+                notify=NotifyActionConfig(title="PR Assigned", body="You were assigned")
             ),
         ),
     ]
@@ -312,7 +304,7 @@ def test_subject_expression_not_evaluated_if_expression_fails() -> None:
             expression='notification.subject.type == "PullRequest"',
             subject_expression='subject.assignees.exists(a, a.login == "testuser")',
             action=RuleAction(
-                notify=NotifyActionConfig(title="PR", message="PR notification")
+                notify=NotifyActionConfig(title="PR", body="PR notification")
             ),
         ),
     ]

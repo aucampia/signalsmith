@@ -108,7 +108,7 @@ class NotificationDispatcher:
 
         coro = self._notifier.send(
             title=rendered.title,
-            message=rendered.message,
+            message=rendered.body,
             buttons=buttons,
             on_clicked=_on_clicked,
             on_dismissed=_on_dismissed,
