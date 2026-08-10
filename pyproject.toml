@@ -6,8 +6,8 @@ version = "0.0.0"
 requires-python = ">=3.14,<4"
 #
 
-description = ""
-authors = []
+description = "GitHub notifications manager with desktop alerts and CEL-based filtering."
+authors = [{ name = "Iwan Aucamp", email = "aucampia@gmail.com" }]
 readme = "README.md"
 license = "CC0-1.0"
 license-files = ["LICENSE"]
