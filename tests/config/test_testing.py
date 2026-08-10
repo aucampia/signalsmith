@@ -42,18 +42,22 @@ from signalsmith.versioning import VersionError
     ("template", "scope", "expected"),
     [
         (
-            "${variables.spam_bots}",
+            "{{ variables.spam_bots }}",
             {"variables": {"spam_bots": ["a", "b"]}},
             ["a", "b"],
         ),
-        ("owner/${parameter}-suffix", {"parameter": "myrepo"}, "owner/myrepo-suffix"),
         (
-            "${parameter.org}",
+            "owner/{{ parameter }}-suffix",
+            {"parameter": "myrepo"},
+            "owner/myrepo-suffix",
+        ),
+        (
+            "{{ parameter.org }}",
             {"parameter": {"org": "acme", "id": "some-team"}},
             "acme",
         ),
         (
-            "${parameter.id}",
+            "{{ parameter.id }}",
             {"parameter": {"org": "acme", "id": "some-team"}},
             "some-team",
         ),
@@ -75,12 +79,12 @@ def test_resolve_config_templates(
 
 def test_resolve_config_templates_unknown_reference_raises() -> None:
     with pytest.raises(TemplateResolutionError):
-        resolve_config_templates("${parameter.missing}", {"parameter": {}})
+        resolve_config_templates("{{ parameter.missing }}", {"parameter": {}})
 
 
 def test_resolve_config_templates_recurses_into_dicts_and_lists() -> None:
     scope = {"parameter": "x"}
-    obj = {"a": ["${parameter}", {"b": "${parameter}"}], "c": 1, "d": None}
+    obj = {"a": ["{{ parameter }}", {"b": "{{ parameter }}"}], "c": 1, "d": None}
     assert resolve_config_templates(obj, scope) == {
         "a": ["x", {"b": "x"}],
         "c": 1,
@@ -113,7 +117,7 @@ def _config_with_variables(variables: dict[str, object]) -> Config:
         ({}, ["a", "b"], ["a", "b"]),
         (
             {"spam_bots": ["dependabot[bot]", "renovate[bot]"]},
-            "${variables.spam_bots}",
+            "{{ variables.spam_bots }}",
             ["dependabot[bot]", "renovate[bot]"],
         ),
     ],
@@ -129,7 +133,7 @@ def test_resolve_parameters(
 def test_resolve_parameters_non_list_template_raises() -> None:
     config = _config_with_variables({"spam_bots": "not-a-list"})
     with pytest.raises(TemplateResolutionError):
-        resolve_parameters("${variables.spam_bots}", config)
+        resolve_parameters("{{ variables.spam_bots }}", config)
 
 
 # ---------------------------------------------------------------------------
@@ -279,7 +283,7 @@ def test_run_case_parameterized_over_inline_list() -> None:
         parameters=["dependabot[bot]", "renovate[bot]"],
         input={
             "notification": {"subject": {"type": "PullRequest"}},
-            "subject": {"user": {"login": "${parameter}"}},
+            "subject": {"user": {"login": "{{ parameter }}"}},
         },
         expect={"rule": "bot_pr_mark_as_read"},
     )
@@ -293,10 +297,10 @@ def test_run_case_parameterized_from_variables() -> None:
     config = _bot_pr_config()
     case = RuleTestCase(
         name="every configured spam bot triggers",
-        parameters="${variables.spam_bots}",
+        parameters="{{ variables.spam_bots }}",
         input={
             "notification": {"subject": {"type": "PullRequest"}},
-            "subject": {"user": {"login": "${parameter}"}},
+            "subject": {"user": {"login": "{{ parameter }}"}},
         },
         expect={"rule": "bot_pr_mark_as_read"},
     )
@@ -353,13 +357,13 @@ def test_run_case_right_rule_wrong_action_fails() -> None:
     [
         RuleTestCase(
             name="bad input template",
-            input={"notification": {"subject": {"type": "${parameter.nope}"}}},
+            input={"notification": {"subject": {"type": "{{ parameter.nope }}"}}},
             expect={"rule": None},
         ),
         RuleTestCase(
             name="bad expect template",
             input={"notification": {"subject": {"type": "Issue"}}},
-            expect={"rule": "${parameter.nope}"},
+            expect={"rule": "{{ parameter.nope }}"},
         ),
         RuleTestCase(
             name="invalid expect.action literal",
@@ -382,7 +386,7 @@ def test_run_case_uses_account_for_username_expressions() -> None:
             Rule(
                 id="reviewer_or_assignee",
                 expression='notification.subject.type == "PullRequest"',
-                subject_expression="subject.assignees.exists(a, a.login == account.github.username)",
+                subject_expression="account.github.username in subject.assignees|map(attribute='login')",
                 action=RuleAction(notify=NotifyActionConfig(title="t", body="m")),
             )
         ],
@@ -418,17 +422,17 @@ def test_run_case_file_input_provides_default_overridden_by_case_input() -> None
 
 
 def test_run_case_expect_can_reference_parameter() -> None:
-    """`expect.rule`/`expect.action` may themselves use `${parameter...}`."""
+    """`expect.rule`/`expect.action` may themselves use `{{ parameter... }}`."""
     config = Config(
         rules=[
             Rule(
                 id="rule_a",
-                expression='notification.repository.full_name.startsWith("a-")',
+                expression='notification.repository.full_name.startswith("a-")',
                 action=RuleAction(ignore=IgnoreActionConfig()),
             ),
             Rule(
                 id="rule_b",
-                expression='notification.repository.full_name.startsWith("b-")',
+                expression='notification.repository.full_name.startswith("b-")',
                 action=RuleAction(mark_as_read=MarkAsReadActionConfig()),
             ),
         ],
@@ -440,9 +444,9 @@ def test_run_case_expect_can_reference_parameter() -> None:
             {"prefix": "b-", "rule": "rule_b", "action": "mark_as_read"},
         ],
         input={
-            "notification": {"repository": {"full_name": "${parameter.prefix}repo"}}
+            "notification": {"repository": {"full_name": "{{ parameter.prefix }}repo"}}
         },
-        expect={"rule": "${parameter.rule}", "action": "${parameter.action}"},
+        expect={"rule": "{{ parameter.rule }}", "action": "{{ parameter.action }}"},
     )
     results = run_case(config, case, {}, "test.yaml")
     assert len(results) == 2
@@ -471,21 +475,22 @@ def test_expected_result_rule_null_is_valid() -> None:
 
 
 def _write_bot_config_test_file(path: Path) -> None:
-    # Block style throughout: unquoted "${...}" inside a flow mapping ("{ }")
-    # breaks the YAML parser, since "{" is a flow indicator there.
+    # Every "{{ ... }}" value is quoted: a leading "{" is a YAML flow-mapping
+    # indicator, so an unquoted "{{ ... }}" scalar fails to parse as YAML
+    # (unlike the old "${...}" syntax, which needed no quoting).
     path.write_text(
         """
-version: '1.0'
+version: '2.0'
 cases:
   - name: bot PR marked as read
-    parameters: ${variables.spam_bots}
+    parameters: '{{ variables.spam_bots }}'
     input:
       notification:
         subject:
           type: PullRequest
       subject:
         user:
-          login: ${parameter}
+          login: '{{ parameter }}'
     expect:
       rule: bot_pr_mark_as_read
       action: mark_as_read
@@ -512,7 +517,7 @@ def test_run_test_files_name_filter(tmp_path: Path) -> None:
     tests_dir.mkdir()
     (tests_dir / "a.yaml").write_text(
         """
-version: '1.0'
+version: '2.0'
 input:
   notification: { subject: { type: Issue } }
 cases:
@@ -559,7 +564,7 @@ def test_run_test_file_without_version_key_is_refused(tmp_path: Path) -> None:
 
 def test_run_test_file_wrong_major_is_refused(tmp_path: Path) -> None:
     path = tmp_path / "a.yaml"
-    path.write_text("version: '2.0'\ncases: []\n")
+    path.write_text("version: '1.0'\ncases: []\n")
     with pytest.raises(VersionError) as exc_info:
         run_test_file(_bot_pr_config(), path)
     assert "Update the test file" in str(exc_info.value)
@@ -567,7 +572,7 @@ def test_run_test_file_wrong_major_is_refused(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("version", "expect_warning"),
-    [("1.0", False), ("1.9", True)],
+    [("2.0", False), ("2.9", True)],
     ids=["matching", "newer-minor"],
 )
 def test_run_test_file_compatible_version_runs(

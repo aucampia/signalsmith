@@ -5,7 +5,7 @@ Filter rules can be tested offline (no GitHub API calls, no token) by writing YA
 Each file holds a list of `cases`. A case's `input:` block supplies a *partial* `notification` (and optional partial `subject`/`account`) — only the fields the rule under test cares about; the rest are filled in from built-in defaults. An `input:` block can also be set at the file level as shared defaults that every case's `input:` deep-merges over. An `expect` block names the rule that should win:
 
 ```yaml
-version: '1.0'                    # required, test file schema version (see doc/config.md#versioning)
+version: '2.0'                    # required, test file schema version (see doc/config.md#versioning)
 
 input:                            # optional, file-level defaults for every case
   account:
@@ -13,14 +13,14 @@ input:                            # optional, file-level defaults for every case
 
 cases:
   - name: bot PRs are marked as read
-    parameters: ${variables.spam_bots}   # parameterize over a config variables.* list
+    parameters: '{{ variables.spam_bots }}'   # parameterize over a config variables.* list
     input:
       notification:
         subject:
           type: PullRequest
       subject:
         user:
-          login: ${parameter}            # current item from `parameters`
+          login: '{{ parameter }}'            # current item from `parameters`
     expect:
       rule: bot_pr_mark_as_read
       action: mark_as_read               # optional cross-check
@@ -32,7 +32,7 @@ cases:
         subject:
           type: PullRequest
       subject:
-        state: ${parameter}
+        state: '{{ parameter }}'
     expect:
       rule: closed_pr_mark_as_read
 
@@ -52,24 +52,24 @@ cases:
     input:
       notification:
         repository:
-          full_name: 'myorg/${parameter.prefix}repo'
+          full_name: 'myorg/{{ parameter.prefix }}repo'
     expect:
-      rule: ${parameter.rule}   # expect.rule/expect.action can reference `parameter` too
+      rule: '{{ parameter.rule }}'   # expect.rule/expect.action can reference `parameter` too
 ```
 
 ## Test Case Structure
 
-- **`version`** (required, file-level) — the test file's schema version (`MAJOR.MINOR`, e.g. `'1.0'`). An incompatible version refuses to run the file; see [Versioning](./config.md#versioning) for the compatibility rules and bump policy.
+- **`version`** (required, file-level) — the test file's schema version (`MAJOR.MINOR`, e.g. `'2.0'`). An incompatible version refuses to run the file; see [Versioning](./config.md#versioning) for the compatibility rules and bump policy.
 - **`expect.rule`** — id of the rule expected to be the first match; `null` asserts that *no* rule matches (falling through to `default_action`).
 - **`expect.action`** (optional) — cross-checks the resulting `notify`/`mark_as_read`/`ignore` action, catching a case where the right *action* happens via the wrong rule.
-- Both `expect.rule` and `expect.action` support the same `${...}` templating as `input.notification`/`input.subject` (see the last example above) — useful when one parameterized case exercises more than one rule.
-- **`parameters`** — either an inline YAML list, or a `${variables.some_list}` reference resolved from the config's `variables:` block. The case runs once per item, with `${parameter}` bound to the current item (`${parameter.field}` for object items, e.g. `spam_groups`). Omit `parameters` to run the case once, unparameterized.
-- **`${...}` templating** — a value that is *exactly* `${expr}` is replaced with the resolved value's real type (list/dict/scalar); a `${expr}` embedded in a longer string is interpolated as text. Available references: `parameter`, `variables` (from config), `account`.
+- Both `expect.rule` and `expect.action` support the same `{{ ... }}` templating as `input.notification`/`input.subject` (see the last example above) — useful when one parameterized case exercises more than one rule.
+- **`parameters`** — either an inline YAML list, or a `{{ variables.some_list }}` reference resolved from the config's `variables:` block. The case runs once per item, with `{{ parameter }}` bound to the current item (`{{ parameter.field }}` for object items, e.g. `spam_groups`). Omit `parameters` to run the case once, unparameterized.
+- **`{{ ... }}` templating** — a value that is *exactly* `{{ expr }}` is replaced with the resolved value's real type (list/dict/scalar/bool), evaluated the same way rule `expression`/`subject_expression` are (see [Rule Expressions Are Jinja](./config.md#rule-expressions-are-jinja)); a `{{ expr }}` embedded in a longer string is rendered to text instead, same as a `notice`/`notify` template. Available references: `parameter`, `variables` (from config), `account`.
 - **`input.account`** — optional, at file level and/or per case; case-level `input` deep-merges over file-level `input`, which deep-merges over the built-in default `{github: {username: testuser}}`. Needed for rules using `account.github.username`.
 - **`input`** at file level sets defaults shared by every case; a case's own `input` is deep-merged over those defaults, so a case only needs to state what it changes.
 - Partial `input.notification`/`input.subject` values are deep-merged over an internal default skeleton that satisfies all required model fields, so a case only needs to set what the rule actually inspects.
 
-Note: when writing YAML flow-style mappings (`{ key: value }`), an unquoted `${...}` value breaks the parser, because `{` is a flow indicator there — quote it (`login: "${parameter}"`) or use block style instead.
+Note: a leading `{{` is a YAML flow-mapping indicator, so **any** `{{ ... }}` value must be quoted (`login: '{{ parameter }}'`) — not just inside flow-style mappings (`{ key: value }`), unlike the old `${...}` syntax, which needed no quoting.
 
 ## Running Tests
 

@@ -1,11 +1,11 @@
 # signalsmith
 
-GitHub notifications manager with desktop alerts and CEL-based filtering.
+GitHub notifications manager with desktop alerts and Jinja-based filtering.
 
 ## Features
 
 - **Desktop notifications** for filtered GitHub notifications (cross-platform via `desktop-notifier`); `signalsmith daemon` additionally supports clicking a notification to open its subject in a browser, and optional Dismiss/Ignore action buttons
-- **Powerful CEL filtering** with two-stage evaluation (notification + subject fields)
+- **Powerful Jinja filtering** with two-stage evaluation (notification + subject fields)
 - **Organization filtering** with include/exclude masks
 - **Flexible actions**: notify, mark-as-read, or custom combinations
 - **Reusable action definitions** for DRY configuration
@@ -64,7 +64,7 @@ asking for a longer wait, signalsmith sleeps for that instead.
 Create `~/.config/signalsmith/config.yaml` (or set `SIGNALSMITH_CONFIG` to a custom path):
 
 ```yaml
-version: '2.0'  # config file schema version (see doc/config.md#versioning)
+version: '3.0'  # config file schema version (see doc/config.md#versioning)
 
 poll_interval: 300  # seconds
 
@@ -84,10 +84,10 @@ notice:
 rules:
   - id: important-mentions
     expression: |
-      notification.reason == "mention" &&
+      notification.reason == "mention" and
       notification.subject.type == "PullRequest"
     subject_expression: |
-      !subject.draft
+      not subject.draft
     action:
       notify:
         title: "PR Mention: {{ notification.subject.title }}"
@@ -109,16 +109,16 @@ independent of where the config file itself lives — see
 
 ```yaml
 # ~/.config/signalsmith/tests/spam-bots.yaml
-version: '1.0'  # test file schema version (see doc/config.md#versioning)
+version: '2.0'  # test file schema version (see doc/config.md#versioning)
 cases:
   - name: bot PRs are marked as read
-    parameters: ${variables.spam_bots}  # every bot login from your config's variables:
+    parameters: '{{ variables.spam_bots }}'  # every bot login from your config's variables:
     input:
       notification:
         subject: { type: PullRequest }
       subject:
         user:
-          login: ${parameter}
+          login: '{{ parameter }}'
     expect:
       rule: bot_pr_mark_as_read
       action: mark_as_read
@@ -152,7 +152,12 @@ export GITHUB_TOKEN=ghp_...
 
 ## Rule Expressions
 
-signalsmith uses [CEL (Common Expression Language)](https://github.com/google/cel-spec) for filtering.
+signalsmith uses [Jinja](https://jinja.palletsprojects.com/) expressions for
+filtering - the same engine `notice`/`notify` templates use, evaluated to a
+real value rather than rendered to text. See
+[doc/config.md](./doc/config.md#rule-expressions-are-jinja) for the full
+picture, including `StrictUndefined` behavior and the filters that replace
+CEL-style macros like `exists`/`all`.
 
 ### Two-Stage Rule Evaluation
 
@@ -189,18 +194,18 @@ or override just `title`/`body`, referencing the computed notice as
 ```yaml
 # Unread PR review requests
 expression: |
-  notification.unread &&
-  notification.reason == "review_requested" &&
+  notification.unread and
+  notification.reason == "review_requested" and
   notification.subject.type == "PullRequest"
 
 # Non-draft PRs mentioning you
 expression: notification.reason == "mention"
-subject_expression: !subject.draft
+subject_expression: not subject.draft
 
 # Issues with specific labels
 expression: notification.subject.type == "Issue"
 subject_expression: |
-  subject.labels.exists(l, l.name == "bug")
+  subject.labels|selectattr('name', 'eq', 'bug')|first is defined
 ```
 
 ## Development

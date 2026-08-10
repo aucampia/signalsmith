@@ -5,7 +5,6 @@ from collections.abc import Iterable
 from typing import Any
 
 from .actions import Action, NotifyRuntime, create_action_for_rule
-from .cel_rules import RuleMatcher
 from .config.models import (
     Config,
     DefaultAction,
@@ -21,6 +20,7 @@ from .github.models import (
 )
 from .notification.models import NotificationOutcome
 from .protocols import NotificationProvider
+from .rules import RuleMatcher
 from .state.ignore_store import IgnoreStore
 from .state.spool import SpoolManager
 from .stats import RunStats
@@ -108,7 +108,7 @@ def create_actions(
     if account is None:
         account = build_account_context(provider)
     rule_matcher = RuleMatcher(
-        config.rules, context={"account": account, "variables": config.variables}
+        config.rules, account=account, variables=config.variables
     )
 
     for notification in notifications:

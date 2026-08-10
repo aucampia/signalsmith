@@ -1,8 +1,8 @@
 # GitHubUser/GitHubLabel/GitHubTeam/GitHubIssue/GitHubPullRequest stay as
 # BaseModel (exempted from the TID251 ban in pyproject.toml): they rely on
 # `extra="allow"` to preserve undeclared GitHub API fields (e.g. `merged` on
-# PRs) for CEL rule expressions and debug/spool JSON, and pydantic dataclasses
-# silently drop extra fields on dump with no way to opt back in.
+# PRs) for Jinja rule expressions and debug/spool JSON, and pydantic
+# dataclasses silently drop extra fields on dump with no way to opt back in.
 from pydantic import BaseModel, TypeAdapter
 from pydantic.dataclasses import dataclass
 

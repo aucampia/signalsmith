@@ -1,4 +1,3 @@
-from signalsmith.cel_rules import RuleMatcher
 from signalsmith.config.models import (
     MarkAsReadActionConfig,
     NotifyActionConfig,
@@ -13,13 +12,14 @@ from signalsmith.github.models import (
     GitHubSubject,
     GitHubUser,
 )
+from signalsmith.rules import RuleMatcher
 
 
 def test_rule_matcher_matches_issue_mention() -> None:
     rules = [
         Rule(
             id="issue_mention",
-            expression='notification.subject.type == "Issue" && notification.reason == "mention"',
+            expression='notification.subject.type == "Issue" and notification.reason == "mention"',
             action=RuleAction(
                 notify=NotifyActionConfig(
                     title="Issue Mention",
@@ -28,7 +28,7 @@ def test_rule_matcher_matches_issue_mention() -> None:
             ),
         ),
     ]
-    matcher = RuleMatcher(rules)
+    matcher = RuleMatcher(rules, account={}, variables={})
 
     notification = GitHubNotification(
         id="123",
@@ -50,7 +50,7 @@ def test_rule_matcher_no_match() -> None:
     rules = [
         Rule(
             id="issue_mention",
-            expression='notification.subject.type == "Issue" && notification.reason == "mention"',
+            expression='notification.subject.type == "Issue" and notification.reason == "mention"',
             action=RuleAction(
                 notify=NotifyActionConfig(
                     title="Issue Mention",
@@ -59,7 +59,7 @@ def test_rule_matcher_no_match() -> None:
             ),
         ),
     ]
-    matcher = RuleMatcher(rules)
+    matcher = RuleMatcher(rules, account={}, variables={})
 
     notification = GitHubNotification(
         id="123",
@@ -94,7 +94,7 @@ def test_rule_matcher_first_match_wins() -> None:
             action=RuleAction(mark_as_read=MarkAsReadActionConfig()),
         ),
     ]
-    matcher = RuleMatcher(rules)
+    matcher = RuleMatcher(rules, account={}, variables={})
 
     notification = GitHubNotification(
         id="123",
@@ -118,13 +118,13 @@ def test_two_stage_filtering_with_subject_match() -> None:
         Rule(
             id="pr_assigned_to_me",
             expression='notification.subject.type == "PullRequest"',
-            subject_expression='subject.assignees.exists(a, a.login == "testuser")',
+            subject_expression='"testuser" in subject.assignees|map(attribute="login")',
             action=RuleAction(
                 notify=NotifyActionConfig(title="PR Assigned", body="You were assigned")
             ),
         ),
     ]
-    matcher = RuleMatcher(rules)
+    matcher = RuleMatcher(rules, account={}, variables={})
 
     notification = GitHubNotification(
         id="456",
@@ -171,13 +171,13 @@ def test_two_stage_filtering_subject_no_match() -> None:
         Rule(
             id="pr_assigned_to_me",
             expression='notification.subject.type == "PullRequest"',
-            subject_expression='subject.assignees.exists(a, a.login == "testuser")',
+            subject_expression='"testuser" in subject.assignees|map(attribute="login")',
             action=RuleAction(
                 notify=NotifyActionConfig(title="PR Assigned", body="You were assigned")
             ),
         ),
     ]
-    matcher = RuleMatcher(rules)
+    matcher = RuleMatcher(rules, account={}, variables={})
 
     notification = GitHubNotification(
         id="456",
@@ -225,7 +225,7 @@ def test_context_variable_available_in_expression() -> None:
         ),
     ]
     matcher = RuleMatcher(
-        rules, context={"account": {"github": {"username": "mention"}}}
+        rules, account={"github": {"username": "mention"}}, variables={}
     )
 
     notification = GitHubNotification(
@@ -250,14 +250,14 @@ def test_context_variable_available_in_subject_expression() -> None:
         Rule(
             id="pr_assigned_to_account",
             expression='notification.subject.type == "PullRequest"',
-            subject_expression="subject.assignees.exists(a, a.login == account.github.username)",
+            subject_expression="account.github.username in subject.assignees|map(attribute='login')",
             action=RuleAction(
                 notify=NotifyActionConfig(title="PR Assigned", body="You were assigned")
             ),
         ),
     ]
     matcher = RuleMatcher(
-        rules, context={"account": {"github": {"username": "testuser"}}}
+        rules, account={"github": {"username": "testuser"}}, variables={}
     )
 
     notification = GitHubNotification(
@@ -302,13 +302,13 @@ def test_subject_expression_not_evaluated_if_expression_fails() -> None:
         Rule(
             id="pr_only",
             expression='notification.subject.type == "PullRequest"',
-            subject_expression='subject.assignees.exists(a, a.login == "testuser")',
+            subject_expression='"testuser" in subject.assignees|map(attribute="login")',
             action=RuleAction(
                 notify=NotifyActionConfig(title="PR", body="PR notification")
             ),
         ),
     ]
-    matcher = RuleMatcher(rules)
+    matcher = RuleMatcher(rules, account={}, variables={})
 
     # Issue notification (not PR)
     notification = GitHubNotification(
@@ -339,3 +339,38 @@ def test_subject_expression_not_evaluated_if_expression_fails() -> None:
     matched = matcher.find_matching_rule(notification, fetch_subject)
     assert matched is None
     assert not fetcher_called
+
+
+def test_rule_matcher_reaches_repository_org_and_subject_web_url() -> None:
+    """`build_context` injects `repository.org`/`subject.web_url` - a rule
+    expression can now reach both, unlike the old CEL activation."""
+    rules = [
+        Rule(
+            id="org_and_url",
+            expression=(
+                'notification.repository.org == "owner" and '
+                "notification.subject.web_url is not none"
+            ),
+            action=RuleAction(notify=NotifyActionConfig(title="Match", body="Match")),
+        ),
+    ]
+    matcher = RuleMatcher(rules, account={}, variables={})
+
+    notification = GitHubNotification(
+        id="123",
+        reason="mention",
+        unread=True,
+        updated_at="2026-06-17T00:00:00Z",
+        subject=GitHubSubject(
+            title="Test Issue",
+            type="Issue",
+            url="https://api.github.com/repos/owner/repo/issues/1",
+        ),
+        repository=GitHubRepository(id=1, name="repo", full_name="owner/repo"),
+        url="https://api.github.com/notifications/threads/123",
+        subscription_url="https://api.github.com/notifications/threads/123/subscription",
+    )
+
+    matched = matcher.find_matching_rule(notification)
+    assert matched is not None
+    assert matched.id == "org_and_url"
