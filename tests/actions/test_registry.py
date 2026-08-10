@@ -38,7 +38,7 @@ from signalsmith.state.spool import SpoolManager
 # `test_every_kind_has_a_sample_action_that_builds_with_an_outcome` with a
 # clear `KeyError`, rather than a puzzling failure elsewhere.
 _SAMPLE_CONFIGS: dict[ActionKind, Any] = {
-    ActionKind.NOTIFY: NotifyActionConfig(title="t", message="m"),
+    ActionKind.NOTIFY: NotifyActionConfig(title="t", body="m"),
     ActionKind.MARK_AS_READ: MarkAsReadActionConfig(),
     ActionKind.IGNORE: IgnoreActionConfig(),
 }
@@ -89,6 +89,7 @@ def test_every_kind_has_a_sample_action_that_builds_with_an_outcome(
         force=False,
         subject=None,
         notify_runtime=None,
+        account={},
     )
 
     action: Action = ACTION_SPECS[kind].build(ctx, _SAMPLE_CONFIGS[kind])

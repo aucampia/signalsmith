@@ -4,10 +4,10 @@ import logging
 
 from desktop_notifier import Button
 
-from ..config.models import NotifyActionConfig, Rule
+from ..config.models import Rule
 from ..github.models import GitHubIssue, GitHubNotification, GitHubPullRequest
 from ..notification.models import NotificationOutcome
-from ..notifier import RenderedNotification, render_notification, send_notification
+from ..notifier import RenderedNotification, send_notification
 from ..state.spool import SpoolManager
 from .runtime import NotifyRuntime
 
@@ -24,7 +24,7 @@ class NotifyAction:
     def __init__(
         self,
         notification: GitHubNotification,
-        config: NotifyActionConfig,
+        rendered: RenderedNotification,
         spool: SpoolManager,
         rule_id: str,
         *,
@@ -34,7 +34,7 @@ class NotifyAction:
         notify_runtime: NotifyRuntime | None = None,
     ) -> None:
         self.notification = notification
-        self.config = config
+        self.rendered = rendered
         self.spool = spool
         self.rule_id = rule_id
         self.rule = rule
@@ -82,13 +82,11 @@ class NotifyAction:
         if dry_run:
             print(
                 f"[DRY RUN] Would send notification (rule: {self.rule_id}): "
-                f"{self.notification.subject.type} - {self.notification.subject.title} "
-                f"({self.notification.repository.full_name}, reason: {self.notification.reason})"
+                f"{self.rendered.title} - {self.rendered.body}"
             )
             return
 
-        rendered = render_notification(self.config, self.notification)
-        self._send(rendered)
+        self._send(self.rendered)
         try:
             self.spool.record_notify(
                 provider=self.provider_name,
@@ -99,8 +97,8 @@ class NotifyAction:
                 else None,
                 rule=self.rule,
                 rule_id=self.rule_id,
-                title=rendered.title,
-                message=rendered.message,
+                title=self.rendered.title,
+                body=self.rendered.body,
             )
         except Exception:
             # A spool write must never suppress the desktop notification

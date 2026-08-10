@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from signalsmith.config.models import (
     DefaultAction,
     IgnoreActionConfig,
     MarkAsReadActionConfig,
+    NoticeConfig,
     NotifyActionConfig,
     Rule,
     RuleAction,
@@ -88,9 +90,7 @@ def test_process_notifications_default_action(
             Rule(
                 id="pr_only",
                 expression='notification.subject.type == "PullRequest"',
-                action=RuleAction(
-                    notify=NotifyActionConfig(title="PR", message="New PR")
-                ),
+                action=RuleAction(notify=NotifyActionConfig(title="PR", body="New PR")),
             )
         ],
     )
@@ -122,7 +122,7 @@ def test_process_notifications_sends_notification_for_match(
                 expression='notification.subject.type == "Issue" && notification.reason == "mention"',
                 action=RuleAction(
                     notify=NotifyActionConfig(
-                        title="Issue Mention", message="You were mentioned"
+                        title="Issue Mention", body="You were mentioned"
                     )
                 ),
             )
@@ -263,7 +263,7 @@ def test_process_notifications_populates_run_stats(
                 id="notify_rule",
                 expression='notification.reason == "notify_me"',
                 action=RuleAction(
-                    notify=NotifyActionConfig(title="Notify", message="Notify")
+                    notify=NotifyActionConfig(title="Notify", body="Notify")
                 ),
             ),
             Rule(
@@ -472,7 +472,7 @@ def test_stats_outcomes_sum_equals_found(
                 id="match_rule",
                 expression='notification.reason == "matched"',
                 action=RuleAction(
-                    notify=NotifyActionConfig(title="Match", message="Matched")
+                    notify=NotifyActionConfig(title="Match", body="Matched")
                 ),
             ),
         ],
@@ -560,3 +560,221 @@ def test_non_ignored_subject_is_processed_normally(
     execute_actions(actions, dry_run=False)
 
     assert "123" in provider.marked_as_read
+
+
+# ---------------------------------------------------------------------------
+# Notice/notify template rendering: on-demand subject fetch, WARNING vs ERROR
+# ---------------------------------------------------------------------------
+
+
+class _UnsupportedSubjectProvider(MockProvider):
+    """A provider whose subject type has nothing fetchable (e.g. a Release),
+    mirroring `GitHubClient.get_subject`'s `NotImplementedError`."""
+
+    def get_subject(
+        self, url: str, type: str, updated_at: str
+    ) -> GitHubIssue:  # pragma: no cover - signature only
+        raise NotImplementedError(f"Subject type {type!r} not supported")
+
+
+def _issue_subject() -> GitHubIssue:
+    return GitHubIssue(
+        id=1,
+        number=1,
+        title="Test Issue",
+        state="open",
+        user=GitHubUser(login="alice", id=1, type="User"),
+        created_at="2026-01-01T00:00:00Z",
+        updated_at="2026-01-01T00:00:00Z",
+    )
+
+
+def test_process_notifications_notice_template_fetches_subject_on_demand(
+    sample_notification: GitHubNotification,
+    spool_manager: SpoolManager,
+    ignore_store: IgnoreStore,
+) -> None:
+    """A `notice` template referencing `subject` triggers an on-demand fetch
+    even though the matched rule has no `subject_expression` of its own."""
+    config = Config(
+        notice=NoticeConfig(body="Opened by {{ subject.user.login }}"),
+        rules=[
+            Rule(
+                id="issue_notify",
+                expression='notification.subject.type == "Issue"',
+                action=RuleAction(notify=NotifyActionConfig()),
+            )
+        ],
+    )
+    assert sample_notification.subject.url is not None
+    provider = MockProvider(
+        [sample_notification],
+        {sample_notification.subject.url: _issue_subject()},
+    )
+
+    list(create_actions(config, provider, spool_manager, ignore_store=ignore_store))
+
+    assert provider.subjects_fetched
+
+
+def test_process_notifications_no_subject_fetch_when_not_referenced(
+    sample_notification: GitHubNotification,
+    spool_manager: SpoolManager,
+    ignore_store: IgnoreStore,
+) -> None:
+    """The built-in default `notice` only references `notification.*`, so a
+    config that never mentions `subject` never pays for a fetch."""
+    config = Config(
+        rules=[
+            Rule(
+                id="issue_notify",
+                expression='notification.subject.type == "Issue"',
+                action=RuleAction(notify=NotifyActionConfig()),
+            )
+        ]
+    )
+    provider = MockProvider([sample_notification])
+
+    list(create_actions(config, provider, spool_manager, ignore_store=ignore_store))
+
+    assert provider.subjects_fetched == []
+
+
+def test_process_notifications_unsupported_subject_type_falls_back_at_warning(
+    sample_notification: GitHubNotification,
+    spool_manager: SpoolManager,
+    ignore_store: IgnoreStore,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An expected fetch failure (no fetchable object for this subject type)
+    logs at WARNING, not ERROR, and still notifies - it isn't a config bug."""
+    config = Config(
+        notice=NoticeConfig(body="By {{ subject.user.login }}"),
+        rules=[
+            Rule(
+                id="issue_notify",
+                expression='notification.subject.type == "Issue"',
+                action=RuleAction(notify=NotifyActionConfig()),
+            )
+        ],
+    )
+    provider = _UnsupportedSubjectProvider([sample_notification])
+
+    with caplog.at_level(logging.WARNING):
+        actions = list(
+            create_actions(config, provider, spool_manager, ignore_store=ignore_store)
+        )
+
+    assert len(actions) == 1
+    outcome, _action = actions[0]
+    assert outcome == NotificationOutcome.NOTIFIED
+    assert not any(r.levelno == logging.ERROR for r in caplog.records)
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+def test_process_notifications_bad_notice_template_falls_back_at_error(
+    sample_notification: GitHubNotification,
+    spool_manager: SpoolManager,
+    ignore_store: IgnoreStore,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A genuine template problem (typo, bad reference) logs at ERROR and
+    still notifies via the built-in fallback - a broken template degrades
+    output, it never drops a notification."""
+    config = Config(
+        notice=NoticeConfig(title="{{ notification.nonexistent }}"),
+        rules=[
+            Rule(
+                id="issue_notify",
+                expression='notification.subject.type == "Issue"',
+                action=RuleAction(notify=NotifyActionConfig()),
+            )
+        ],
+    )
+    provider = MockProvider([sample_notification])
+
+    with caplog.at_level(logging.WARNING):
+        actions = list(
+            create_actions(config, provider, spool_manager, ignore_store=ignore_store)
+        )
+
+    assert len(actions) == 1
+    outcome, _action = actions[0]
+    assert outcome == NotificationOutcome.NOTIFIED
+    assert any(r.levelno == logging.ERROR for r in caplog.records)
+
+
+def test_process_notifications_syntax_error_template_does_not_crash(
+    sample_notification: GitHubNotification,
+    spool_manager: SpoolManager,
+    ignore_store: IgnoreStore,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Regression test: a `notice` template with a Jinja syntax error must
+    not crash action construction (previously `_resolve_subject_for_templates`
+    called `template_names` unguarded) - it falls back and logs at ERROR
+    like any other broken template, and the notification still goes out."""
+    config = Config(
+        notice=NoticeConfig(title="{{ subject.user.login"),  # unterminated
+        rules=[
+            Rule(
+                id="issue_notify",
+                expression='notification.subject.type == "Issue"',
+                action=RuleAction(notify=NotifyActionConfig()),
+            )
+        ],
+    )
+    provider = MockProvider([sample_notification])
+
+    with caplog.at_level(logging.WARNING):
+        actions = list(
+            create_actions(config, provider, spool_manager, ignore_store=ignore_store)
+        )
+
+    assert len(actions) == 1
+    outcome, _action = actions[0]
+    assert outcome == NotificationOutcome.NOTIFIED
+    assert any(r.levelno == logging.ERROR for r in caplog.records)
+
+
+def test_process_notifications_no_subject_url_skips_fetch(
+    spool_manager: SpoolManager,
+    ignore_store: IgnoreStore,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Regression test: when the notification has no subject URL,
+    `_resolve_subject_for_templates` must not call the provider at all -
+    that's an expected gap, not a fetch attempt with a bogus empty URL."""
+    notification = GitHubNotification(
+        id="1",
+        reason="mention",
+        unread=True,
+        updated_at="2026-06-17T00:00:00Z",
+        subject=GitHubSubject(title="Test", type="Issue", url=None),
+        repository=GitHubRepository(id=1, name="repo", full_name="owner/repo"),
+        url="https://api.github.com/notifications/threads/1",
+        subscription_url="https://api.github.com/notifications/threads/1/subscription",
+    )
+    config = Config(
+        notice=NoticeConfig(body="By {{ subject.user.login }}"),
+        rules=[
+            Rule(
+                id="issue_notify",
+                expression='notification.subject.type == "Issue"',
+                action=RuleAction(notify=NotifyActionConfig()),
+            )
+        ],
+    )
+    provider = MockProvider([notification])
+
+    with caplog.at_level(logging.WARNING):
+        actions = list(
+            create_actions(config, provider, spool_manager, ignore_store=ignore_store)
+        )
+
+    assert provider.subjects_fetched == []
+    assert len(actions) == 1
+    outcome, _action = actions[0]
+    assert outcome == NotificationOutcome.NOTIFIED
+    assert not any(r.levelno == logging.ERROR for r in caplog.records)
+    assert any(r.levelno == logging.WARNING for r in caplog.records)

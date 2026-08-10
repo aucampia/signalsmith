@@ -28,7 +28,7 @@ def test_config_load_without_version_key_is_refused(tmp_path: Path) -> None:
 
 
 def test_config_load_wrong_major_is_refused(tmp_path: Path) -> None:
-    config_path = _write_config(tmp_path, "version: '2.0'\n" + _MINIMAL_RULES)
+    config_path = _write_config(tmp_path, "version: '1.0'\n" + _MINIMAL_RULES)
     with pytest.raises(VersionError) as exc_info:
         Config.load(config_path)
     assert "Update the config file" in str(exc_info.value)
@@ -36,7 +36,7 @@ def test_config_load_wrong_major_is_refused(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("version", "expect_warning"),
-    [("1.0", False), ("1.9", True)],
+    [("2.0", False), ("2.9", True)],
     ids=["matching", "newer-minor"],
 )
 def test_config_load_compatible_version_loads(
@@ -61,7 +61,7 @@ def test_config_default_version_is_current() -> None:
             )
         ]
     )
-    assert str(config.version) == "1.1"
+    assert str(config.version) == "2.0"
 
 
 def _clear_path_env(monkeypatch: pytest.MonkeyPatch) -> None:

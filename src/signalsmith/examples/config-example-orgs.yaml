@@ -1,13 +1,19 @@
 # Example configuration with organization filtering
 
 # Config file schema version (see AGENTS.md for the versioning policy)
-version: '1.1'
+version: '2.0'
 
 renotify_interval: 3600
 poll_interval: 300
 
 # Default action for unmatched notifications (default: notify)
 default_action: notify
+
+# Generic notice computed for every notification (Jinja templates - see
+# doc/config.md#notices-and-templates).
+notice:
+  title: '{{ notification.reason }} {{ notification.subject.type }} {{ notification.subject.title }}'
+  body: '{{ notification.repository.full_name }}'
 
 # Organization masks - filter notifications in the processor
 # All notifications are fetched first, then filtered by organization
@@ -25,9 +31,7 @@ masks:
 
 actions:
   notify-default:
-    notify:
-      title: '${notification.reason} ${notification.subject.type} ${notification.subject.title}'
-      message: '...'
+    notify: {}   # uses the generic notice above verbatim
 
   ignore-silently:
     ignore: {}

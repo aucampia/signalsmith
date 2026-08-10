@@ -24,7 +24,7 @@ from pathlib import Path
 from xdg import xdg_data_home
 
 from ..cache import resolve_cache_dir
-from ..config.models import Config, Rule
+from ..config.models import RULE_ADAPTER, Config, Rule
 from ..github.models import GitHubIssue, GitHubNotification, GitHubPullRequest
 from ..versioning import STATE_VERSION, ensure_store_version
 from .models import SPOOL_ENTRY_ADAPTER, SpoolEntry, SpoolNotifyEvent
@@ -125,7 +125,7 @@ class SpoolManager:
         rule: Rule | None,
         rule_id: str,
         title: str,
-        message: str,
+        body: str,
     ) -> None:
         now = datetime.now(UTC)
         key = (provider, notification.id)
@@ -133,9 +133,12 @@ class SpoolManager:
         subject_dict = (
             None if subject is None else json.loads(subject.model_dump_json())
         )
+        rule_dict = (
+            None if rule is None else RULE_ADAPTER.dump_python(rule, mode="json")
+        )
 
         event = SpoolNotifyEvent(
-            notified_at=now, rule_id=rule_id, title=title, message=message
+            notified_at=now, rule_id=rule_id, title=title, body=body
         )
 
         if loaded is not None:
@@ -145,9 +148,9 @@ class SpoolManager:
                 last_notified_at=now,
                 notify_count=loaded.entry.notify_count + 1,
                 rule_id=rule_id,
-                rule=rule,
+                rule=rule_dict,
                 title=title,
-                message=message,
+                body=body,
                 web_url=notification.subject.web_url,
                 notification=notification,
                 subject_type=subject_type or loaded.entry.subject_type,
@@ -165,9 +168,9 @@ class SpoolManager:
                 last_notified_at=now,
                 notify_count=1,
                 rule_id=rule_id,
-                rule=rule,
+                rule=rule_dict,
                 title=title,
-                message=message,
+                body=body,
                 web_url=notification.subject.web_url,
                 notification=notification,
                 subject_type=subject_type,

@@ -23,6 +23,7 @@ signalsmith/
 │   ├── errors.py                # SignalsmithError, AuthError (VersionError also derives from this)
 │   ├── cache.py                 # Cache directory (disposable: notification/subject cache, spool trash)
 │   ├── logging_config.py        # setup_logging, celpy noise filter, debug dump
+│   ├── templating.py            # Jinja rendering of `notice`/`notify` title/body
 │   ├── notifier.py              # Desktop notification sender (`run`, non-interactive)
 │   ├── notify_dispatcher.py     # Persistent interactive notifier (`daemon`)
 │   ├── cel_rules.py             # CEL expression filtering
@@ -69,6 +70,7 @@ signalsmith/
 │   ├── test_notifier.py
 │   ├── test_notify_dispatcher.py
 │   ├── test_processor.py
+│   ├── test_templating.py
 │   ├── test_example_configs.py
 │   └── test_versioning.py
 ├── doc/                  # Reference documentation

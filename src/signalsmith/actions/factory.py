@@ -7,7 +7,7 @@ from ..github.models import GitHubIssue, GitHubNotification, GitHubPullRequest
 from ..protocols import NotificationProvider
 from ..state.spool import SpoolManager
 from .base import Action, ActionKind
-from .registry import ACTION_SPECS, ActionBuildContext
+from .registry import ACTION_SPECS, ActionBuildContext, SubjectFetcher
 from .runtime import NotifyRuntime
 
 __all__ = ["create_action_for_rule", "resolve_action_config"]
@@ -50,6 +50,8 @@ def create_action_for_rule(
     *,
     rule: Rule | None = None,
     notify_runtime: NotifyRuntime | None = None,
+    account: dict[str, Any] | None = None,
+    fetch_subject: SubjectFetcher | None = None,
 ) -> Action:
     """Create the appropriate action for a notification based on `action`.
 
@@ -65,6 +67,10 @@ def create_action_for_rule(
         subject: The subject fetched while evaluating this rule, if any
         rule: The matched rule, or None for the default-action fallback
         notify_runtime: Interactive-notification context from `daemon`, if any
+        account: `account` variable for `notice`/`notify` templates
+        fetch_subject: Fetches a subject on demand for a `notify` action's
+            templates when `subject` wasn't already fetched during rule
+            matching (unused by other action kinds)
 
     Returns:
         The appropriate action to execute
@@ -80,5 +86,7 @@ def create_action_for_rule(
         force=force,
         subject=subject,
         notify_runtime=notify_runtime,
+        account=account or {},
+        fetch_subject=fetch_subject,
     )
     return ACTION_SPECS[kind].build(ctx, action_config)

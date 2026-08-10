@@ -52,11 +52,36 @@ _ACTION_KIND_LIST = _oxford_join([f"'{v}'" for v in _ACTION_KIND_VALUES])
 _ACTION_KIND_SLASH_LIST = "/".join(_ACTION_KIND_VALUES)
 _ACTION_KIND_QUOTED_SLASH_LIST = "/".join(f"'{v}'" for v in _ACTION_KIND_VALUES)
 
+# Jinja template text (rendered by `templating.py`). Defined here rather than
+# in `templating.py` so `NoticeConfig` can use them as field defaults without
+# a config -> templating -> config import cycle. `templating._static_default_title`/
+# `_static_default_body` independently mirror this text as plain Python (so
+# they can never themselves raise) - kept in sync by
+# `test_templating.py::test_default_config_matches_builtin_default`.
+DEFAULT_NOTICE_TITLE = (
+    "{{ notification.subject.type }}: {{ notification.subject.title }}"
+)
+DEFAULT_NOTICE_BODY = (
+    "{{ notification.repository.full_name }} ({{ notification.reason }})"
+)
+
+
+@dataclass(kw_only=True)
+class NoticeConfig:
+    """Top-level `notice:` block: the generic notice computed for every
+    notification, before any rule-specific `notify.title`/`notify.body`
+    override (see `NotifyActionConfig`)."""
+
+    title: str = DEFAULT_NOTICE_TITLE
+    body: str = DEFAULT_NOTICE_BODY
+
 
 @dataclass(kw_only=True)
 class NotifyActionConfig:
-    title: str
-    message: str
+    # Jinja templates (see `templating.py`); `None` defaults to the
+    # corresponding rendered `notice.title`/`notice.body`.
+    title: str | None = None
+    body: str | None = None
 
 
 @dataclass(kw_only=True)
@@ -117,6 +142,11 @@ class Rule:
     action: RuleAction
 
 
+# Dumps a matched `Rule` to a plain dict for `state.models.SpoolEntry.rule` -
+# see the comment there for why the spool stores raw JSON rather than a `Rule`.
+RULE_ADAPTER: TypeAdapter[Rule] = TypeAdapter(Rule)
+
+
 @dataclass(kw_only=True)
 class OrgMasks:
     """Organization filtering configuration."""
@@ -169,6 +199,7 @@ class Config:
     version: SchemaVersion = CONFIG_VERSION
     actions: dict[str, ActionDefinition] = field(default_factory=dict)
     masks: Masks = field(default_factory=Masks)
+    notice: NoticeConfig = field(default_factory=NoticeConfig)
     rules: list[Rule]
     renotify_interval: int = 3600
     poll_interval: int = 300

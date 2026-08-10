@@ -5,13 +5,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from signalsmith.actions import NotifyAction, NotifyRuntime
-from signalsmith.config.models import NotifyActionConfig
 from signalsmith.github.models import (
     GitHubNotification,
     GitHubRepository,
     GitHubSubject,
 )
 from signalsmith.notification.models import NotificationOutcome
+from signalsmith.notifier import RenderedNotification
 from signalsmith.state.spool import SpoolManager
 
 
@@ -45,7 +45,7 @@ def make_action(
 ) -> NotifyAction:
     return NotifyAction(
         notification,
-        NotifyActionConfig(title="Title", message="Message"),
+        RenderedNotification(title="Title", body="Message"),
         spool,
         "my_rule",
         provider_name="github",
@@ -74,7 +74,7 @@ def test_execute_without_runtime_uses_plain_send(
     mock_send.assert_called_once()
     rendered = mock_send.call_args.args[0]
     assert rendered.title == "Title"
-    assert rendered.message == "Message"
+    assert rendered.body == "Message"
 
 
 def test_execute_with_runtime_disabled_sends_no_buttons(
@@ -178,3 +178,16 @@ def test_execute_dry_run_never_sends(
 
     mock_send.assert_not_called()
     dispatcher.send.assert_not_called()
+
+
+def test_execute_dry_run_prints_rendered_title_and_body(
+    notification: GitHubNotification,
+    spool: SpoolManager,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    action = make_action(notification, spool)
+    action.execute(dry_run=True)
+
+    out = capsys.readouterr().out
+    assert "Title" in out
+    assert "Message" in out

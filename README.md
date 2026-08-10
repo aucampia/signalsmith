@@ -64,7 +64,7 @@ asking for a longer wait, signalsmith sleeps for that instead.
 Create `~/.config/signalsmith/config.yaml` (or set `SIGNALSMITH_CONFIG` to a custom path):
 
 ```yaml
-version: '1.1'  # config file schema version (see doc/config.md#versioning)
+version: '2.0'  # config file schema version (see doc/config.md#versioning)
 
 poll_interval: 300  # seconds
 
@@ -75,6 +75,12 @@ masks:
     exclude:
       - spam-org
 
+# Generic notice computed for every notification - see
+# doc/config.md#notices-and-templates. `notify: {}` below uses it verbatim.
+notice:
+  title: "{{ notification.subject.type }}: {{ notification.subject.title }}"
+  body: "{{ notification.repository.full_name }} ({{ notification.reason }})"
+
 rules:
   - id: important-mentions
     expression: |
@@ -84,16 +90,14 @@ rules:
       !subject.draft
     action:
       notify:
-        title: "PR Mention: ${notification.subject.title}"
-        message: "${notification.repository.full_name}"
+        title: "PR Mention: {{ notification.subject.title }}"
+        body: "{{ notification.repository.full_name }}"
 
   - id: review-requests
     expression: |
       notification.reason == "review_requested"
     action:
-      notify:
-        title: "Review Request"
-        message: "${notification.subject.title}"
+      notify: {}
 ```
 
 ### Example Configurations
@@ -167,7 +171,7 @@ This allows efficient filtering without fetching every subject from the API.
 
 ### Available Fields
 
-See [SPEC.md](./SPEC.md) for complete field reference.
+See [doc/config.md](./doc/config.md#two-stage-rule-evaluation) for the complete field reference.
 
 **Notification fields:**
 - `notification.id`, `notification.reason`, `notification.unread`, `notification.updated_at`
@@ -177,6 +181,16 @@ See [SPEC.md](./SPEC.md) for complete field reference.
 **Subject fields** (Issues/PRs):
 - `subject.state`, `subject.user.login`, `subject.labels[]`, `subject.assignees[]`
 - PR-specific: `subject.draft`, `subject.mergeable_state`, `subject.requested_reviewers[]`
+
+### Notice and Notify Templates
+
+Rather than write a `title`/`body` on every `notify` action, a top-level
+`notice:` block computes one generically, using [Jinja](https://jinja.palletsprojects.com/)
+templates with the same fields as the rule expressions above (plus `subject`,
+`account`, `variables`). A `notify` action can use it verbatim (`notify: {}`)
+or override just `title`/`body`, referencing the computed notice as
+`{{ notice.title }}`/`{{ notice.body }}`. See
+[doc/config.md](./doc/config.md#notices-and-templates) for the full picture.
 
 ### Example Rules
 

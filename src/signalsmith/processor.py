@@ -37,20 +37,17 @@ def build_account_context(provider: NotificationProvider) -> dict[str, Any]:
     return {"github": {"username": provider.get_authenticated_user()}}
 
 
-def default_rule_action(config: Config, notification: GitHubNotification) -> RuleAction:
+def default_rule_action(config: Config) -> RuleAction:
     """Build the `RuleAction` a notification falls back to when no rule matches.
 
     Synthesized rather than a special case: routing it through the same
     `create_action_for_rule` as a matched rule means the notify/skip
-    decision (renotify interval) is made in exactly one place.
+    decision (renotify interval) is made in exactly one place. The notify
+    case is left title/body-less so it renders the top-level `notice:` block
+    verbatim, same as an explicit `notify: {}` in a rule.
     """
     if config.default_action == DefaultAction.NOTIFY:
-        return RuleAction(
-            notify=NotifyActionConfig(
-                title=f"{notification.subject.type}: {notification.subject.title}",
-                message=f"{notification.repository.full_name} ({notification.reason})",
-            )
-        )
+        return RuleAction(notify=NotifyActionConfig())
     return RuleAction(ignore=IgnoreActionConfig())
 
 
@@ -203,11 +200,7 @@ def create_actions(
             yield (NotificationOutcome.FILTERED_ERROR, None)
             continue
 
-        rule_action = (
-            rule.action
-            if rule is not None
-            else default_rule_action(config, notification)
-        )
+        rule_action = rule.action if rule is not None else default_rule_action(config)
         action = create_action_for_rule(
             notification,
             rule_action,
@@ -219,6 +212,8 @@ def create_actions(
             subject=fetched_subject,
             rule=rule,
             notify_runtime=notify_runtime,
+            account=account,
+            fetch_subject=fetch_subject,
         )
 
         logger.debug(
