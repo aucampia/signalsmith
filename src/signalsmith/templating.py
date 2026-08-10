@@ -1,19 +1,25 @@
-"""Jinja-based rendering for notification titles/bodies.
+"""Jinja-based rendering and rule-expression evaluation.
 
-Two template kinds share one engine here:
+Two distinct uses share one engine and one context builder here:
 
-- `notice.title`/`notice.body` (`config.models.NoticeConfig`) - the generic,
-  rule-independent notice computed for every notification.
-- `notify.title`/`notify.body` (`config.models.NotifyActionConfig`) - a rule's
-  optional override, which may reference the already-rendered
+- `notice.title`/`notice.body` (`config.models.NoticeConfig`) and
+  `notify.title`/`notify.body` (`config.models.NotifyActionConfig`) -
+  templates, rendered with `render()`/`render_notice()`/`render_notify()`.
+  A `notify` override may reference the already-rendered
   `notice.title`/`notice.body` via `notice` in scope.
+- `Rule.expression`/`Rule.subject_expression` (`config.models.Rule`),
+  evaluated by `rules.RuleMatcher` via `compile_expression()`/`evaluate()`
+  below - a boolean expression, not a template, so it is compiled with
+  `Environment.compile_expression` rather than `Environment.from_string`.
 
-Both use `StrictUndefined`: a template referencing something that isn't in
-scope raises rather than silently rendering blank or verbatim (the old
-`${...}` behavior in the now-deleted `notifier.format_template`). `render()`
-catches that and falls back rather than dropping the notification - see
-`actions/registry._build_notify` for the subject-fetch-then-render sequence
-and the WARNING/ERROR split via `expected_failure`.
+Both use `StrictUndefined`: a reference to something that isn't in scope
+raises rather than silently rendering blank, verbatim, or `None`. For
+templates, `render()` catches that and falls back rather than dropping the
+notification - see `actions/registry._build_notify` for the
+subject-fetch-then-render sequence and the WARNING/ERROR split via
+`expected_failure`. Rule expressions do **not** fall back - a bad expression
+must not silently read as "no match", so it propagates and the notification
+is reported as errored (see `rules.RuleMatcher`).
 """
 
 import json
@@ -39,6 +45,8 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "Notice",
     "build_context",
+    "compile_expression",
+    "evaluate",
     "references_subject",
     "render_notice",
     "render_notify",
@@ -52,7 +60,14 @@ ENV = jinja2.Environment(
     lstrip_blocks=True,
 )
 
+# `select` calls a test as `test(item, *args)`, so `prefix` below is the
+# left-hand list item and `string` is the value passed to `select`:
+#   variables.offtopic.prefixes | select('startingwith', full_name)
+# tests, for each prefix in the list, whether `full_name` starts with it.
+ENV.tests["startingwith"] = lambda prefix, string: string.startswith(prefix)
+
 _TEMPLATE_CACHE: dict[str, jinja2.Template] = {}
+_EXPRESSION_CACHE: dict[str, jinja2.environment.TemplateExpression] = {}
 
 
 def _compile(source: str) -> jinja2.Template:
@@ -62,6 +77,51 @@ def _compile(source: str) -> jinja2.Template:
         template = ENV.from_string(source)
         _TEMPLATE_CACHE[source] = template
     return template
+
+
+def compile_expression(source: str) -> jinja2.environment.TemplateExpression:
+    """Compile a boolean/value expression (not a `{{ }}` template) once per process.
+
+    Unlike `_compile`, this is for bare expressions like
+    `notification.subject.type == "PullRequest"` - `Rule.expression`,
+    `Rule.subject_expression`, and the test-file `{{ ... }}` whole-string
+    form (`config.testing`). `undefined_to_none=False` is deliberate: the
+    default would turn a missing attribute into `None` instead of raising,
+    which would make a typo silently evaluate to a falsy no-match rather
+    than surfacing as an error.
+
+    Raises `jinja2.TemplateSyntaxError` on a syntax error.
+    """
+    expression = _EXPRESSION_CACHE.get(source)
+    if expression is None:
+        expression = ENV.compile_expression(source, undefined_to_none=False)
+        _EXPRESSION_CACHE[source] = expression
+    return expression
+
+
+def evaluate(source: str, context: Mapping[str, Any]) -> Any:
+    """Evaluate `source` as an expression against `context` and return the result.
+
+    Raises `jinja2.TemplateSyntaxError` on a syntax error and
+    `jinja2.UndefinedError` on a reference to something not in `context`.
+
+    A bare undefined reference (e.g. `subject.merged` with no further
+    operation on it) does *not* itself raise - `StrictUndefined` only raises
+    when something is done with the value (compared, stringified, iterated).
+    Truthiness checks in `rules.RuleMatcher` trigger that for free via
+    `__bool__`, but a caller like `config.testing` that returns the raw value
+    (e.g. a whole-string `{{ parameter.nope }}`) would otherwise get back a
+    silent `Undefined` object instead of an error, so it's forced explicitly
+    here.
+    """
+    result = compile_expression(source)(**context)
+    if isinstance(result, jinja2.Undefined):
+        # StrictUndefined raises on `str()` (its `__str__` is the same
+        # `_fail_with_undefined_error` hook `__bool__`/`__iter__` use) - this
+        # forces that through the public dunder path rather than calling the
+        # private method directly.
+        str(result)
+    return result
 
 
 def template_names(source: str) -> set[str]:
@@ -146,13 +206,15 @@ def build_context(
     account: dict[str, Any],
     variables: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build the Jinja context - the same names/values CEL expressions see.
+    """Build the Jinja context shared by rule expressions and templates.
 
-    `notification`/`account`/`variables` are the same JSON-mode values
-    `cel_rules.RuleMatcher` builds its activation from, so a path that works
-    in a rule `expression` works in a template. Two properties aren't part of
-    that JSON dump - `GitHubSubject.web_url` and `GitHubRepository.org` are
-    plain `@property`s (`github/models.py`) - and are injected here.
+    `rules.RuleMatcher` uses this directly to evaluate `Rule.expression`/
+    `Rule.subject_expression`, so a path that works in a rule expression
+    works in a `notice`/`notify` template too - both see the same
+    `notification`/`subject`/`account`/`variables`. Two properties aren't
+    part of the JSON dump - `GitHubSubject.web_url` and
+    `GitHubRepository.org` are plain `@property`s (`github/models.py`) - and
+    are injected here.
     """
     notification_dict = GITHUB_NOTIFICATION_ADAPTER.dump_python(
         notification, mode="json"

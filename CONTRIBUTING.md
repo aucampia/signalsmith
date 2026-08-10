@@ -22,11 +22,11 @@ signalsmith/
 │   ├── stats.py                 # RunStats
 │   ├── errors.py                # SignalsmithError, AuthError (VersionError also derives from this)
 │   ├── cache.py                 # Cache directory (disposable: notification/subject cache, spool trash)
-│   ├── logging_config.py        # setup_logging, celpy noise filter, debug dump
-│   ├── templating.py            # Jinja rendering of `notice`/`notify` title/body
+│   ├── logging_config.py        # setup_logging, debug dump
+│   ├── templating.py            # Shared Jinja engine: rule expressions, `notice`/`notify` title/body
 │   ├── notifier.py              # Desktop notification sender (`run`, non-interactive)
 │   ├── notify_dispatcher.py     # Persistent interactive notifier (`daemon`)
-│   ├── cel_rules.py             # CEL expression filtering
+│   ├── rules.py                 # Jinja expression filtering (RuleMatcher)
 │   ├── protocols.py             # Provider protocol (NotificationProvider)
 │   ├── versioning.py            # Schema versioning for config/test/state/cache
 │   ├── github/                  # GitHub API concerns
@@ -62,10 +62,10 @@ signalsmith/
 │   │   └── test_ignore_store.py
 │   ├── conftest.py       # Shared fixtures (MockProvider, minimal Config, ...)
 │   ├── test_cli.py
-│   ├── test_cel_rules.py
 │   ├── test_notifier.py
 │   ├── test_notify_dispatcher.py
 │   ├── test_processor.py
+│   ├── test_rules.py
 │   ├── test_templating.py
 │   └── test_versioning.py
 ├── doc/                  # Reference documentation
@@ -162,7 +162,7 @@ uv run signalsmith daemon --poll-interval 300
 - Name test files `test_*.py`
 - Use pytest fixtures for common setup
 - Import from `signalsmith.*` (not relative imports in tests)
-- Aim for good coverage of core logic (CEL filters, processing, API client)
+- Aim for good coverage of core logic (Jinja filters, processing, API client)
 
 ## Configuration Files
 

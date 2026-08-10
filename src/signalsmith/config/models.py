@@ -5,6 +5,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Self
 
+import jinja2
 import yaml
 from pydantic import TypeAdapter, model_validator
 from pydantic.dataclasses import dataclass
@@ -140,6 +141,30 @@ class Rule:
     expression: str
     subject_expression: str | None = None
     action: RuleAction
+
+    @model_validator(mode="after")
+    def validate_expression_syntax(self) -> Self:
+        """Catch a Jinja syntax error at config-load time, not at match time.
+
+        Local import: `templating` imports `NoticeConfig`/`NotifyActionConfig`
+        from this module, so a module-level import here would cycle.
+        """
+        from .. import templating
+
+        for field_name, expression in (
+            ("expression", self.expression),
+            ("subject_expression", self.subject_expression),
+        ):
+            if expression is None:
+                continue
+            try:
+                templating.compile_expression(expression)
+            except jinja2.TemplateSyntaxError as exc:
+                raise ValueError(
+                    f"Rule {self.id!r} has an invalid {field_name}: "
+                    f"{expression!r}: {exc}"
+                ) from exc
+        return self
 
 
 # Dumps a matched `Rule` to a plain dict for `state.models.SpoolEntry.rule` -

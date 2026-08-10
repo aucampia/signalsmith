@@ -1,5 +1,6 @@
 import logging
 
+import jinja2
 import pytest
 
 from signalsmith.config.models import NoticeConfig, NotifyActionConfig
@@ -11,7 +12,10 @@ from signalsmith.github.models import (
     GitHubUser,
 )
 from signalsmith.templating import (
+    ENV,
     build_context,
+    compile_expression,
+    evaluate,
     references_subject,
     render,
     render_notice,
@@ -153,6 +157,55 @@ class TestRender:
         assert result == "fallback"
         assert len(caplog.records) == 1
         assert caplog.records[0].levelno == logging.ERROR
+
+
+class TestEvaluate:
+    def test_returns_real_python_types(self) -> None:
+        assert evaluate("notification.count", {"notification": {"count": 3}}) == 3
+        assert evaluate(
+            "variables.spam_bots", {"variables": {"spam_bots": ["a", "b"]}}
+        ) == ["a", "b"]
+        assert evaluate('a == "a"', {"a": "a"}) is True
+
+    def test_bare_undefined_reference_raises(self) -> None:
+        """A bare attribute access (no comparison/bool/str applied to it)
+        must still raise - `StrictUndefined` only raises when something is
+        *done* with the value, so this pins the explicit check in
+        `evaluate` that forces it rather than silently returning an
+        `Undefined` object."""
+        with pytest.raises(jinja2.UndefinedError):
+            evaluate("subject.merged", {"subject": {}})
+
+    def test_syntax_error_raises(self) -> None:
+        with pytest.raises(jinja2.TemplateSyntaxError):
+            evaluate("a == && b", {})
+
+    def test_compile_expression_is_cached(self) -> None:
+        assert compile_expression("a == b") is compile_expression("a == b")
+
+
+class TestStartingwithTest:
+    def test_select_filters_matching_prefixes(self) -> None:
+        result = evaluate(
+            "prefixes | select('startingwith', full_name) | list",
+            {
+                "prefixes": ["storebrand-technology/grc-", "other-"],
+                "full_name": "storebrand-technology/grc-foo",
+            },
+        )
+        assert result == ["storebrand-technology/grc-"]
+
+    def test_select_excludes_non_matching_prefixes(self) -> None:
+        result = evaluate(
+            "prefixes | select('startingwith', full_name) | list",
+            {"prefixes": ["other-"], "full_name": "storebrand-technology/grc-foo"},
+        )
+        assert result == []
+
+    def test_registered_on_shared_environment(self) -> None:
+        """Registered on `ENV` (not some other environment) so both rule
+        expressions and `config.testing`'s `{{ }}` resolver see it."""
+        assert "startingwith" in ENV.tests
 
 
 class TestReferencesSubject:

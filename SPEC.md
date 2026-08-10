@@ -11,7 +11,7 @@ mechanisms. This results in notification spam drowning out the alerts that actua
 attention:
 
 1. **Pull** unread notifications from the source (currently GitHub)
-2. **Filter** using CEL expression rules to classify each notification
+2. **Filter** using Jinja expression rules to classify each notification
 3. **Auto-dismiss** (mark as read) notifications you don't care about
 4. **Alert** only on notifications that pass your filters
 
@@ -37,7 +37,7 @@ The typical workflow is iterative refinement:
 ## Configuration
 
 `signalsmith` uses a YAML configuration file to define:
-- Filter rules (CEL expressions evaluated in order)
+- Filter rules (Jinja expressions evaluated in order)
 - Actions (notify, ignore, mark_as_read)
 - Variables (reusable data for expressions)
 - Organization masks and polling intervals
@@ -63,12 +63,19 @@ Three layers, each usable (and testable) independently of the one above it:
   token. Nothing here depends on Typer, so it can be driven from a test, a
   script, or eventually a different frontend without going through the CLI.
 - **Domain modules** — `processor` (fetch → org-mask → rule-match → action,
-  see `cel_rules.RuleMatcher`), `actions` (turns a matched rule into an
+  see `rules.RuleMatcher`), `actions` (turns a matched rule into an
   executable `Action`, rendering its notice via `templating` along the way),
-  `templating` (Jinja rendering of the top-level `notice:` block and a
-  `notify` action's `title`/`body` overrides), `state` (durable spool +
-  permanent-ignore store), `github` (the current `NotificationProvider`
-  implementation), `config` (the YAML schema and its offline test harness).
+  `templating` (the shared Jinja engine: rule `expression`/`subject_expression`
+  evaluation, and rendering of the top-level `notice:` block and a `notify`
+  action's `title`/`body` overrides), `state` (durable spool + permanent-ignore
+  store), `github` (the current `NotificationProvider` implementation),
+  `config` (the YAML schema and its offline test harness).
+
+`rules.RuleMatcher` and `templating`'s rendering both evaluate against the
+same `templating.build_context` output, so a name that resolves in a rule
+`expression` resolves identically in a `notice`/`notify` template - one
+context builder, one Jinja `Environment`, no separate CEL activation to keep
+in sync.
 
 Notice/notify rendering happens in `actions.registry._build_notify`, at
 action-construction time inside `processor.create_actions` - not lazily in

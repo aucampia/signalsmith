@@ -15,18 +15,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import jinja2
 import yaml
 from pydantic import TypeAdapter
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 
+from .. import templating
 from ..actions.factory import resolve_action_config
-from ..cel_rules import RuleMatcher
 from ..github.models import (
     GITHUB_NOTIFICATION_ADAPTER,
     GitHubIssue,
     GitHubNotification,
     GitHubPullRequest,
 )
+from ..rules import RuleMatcher
 from ..versioning import TEST_VERSION, SchemaVersion, check_file_version
 from .models import ActionKind, Config, DefaultAction
 
@@ -47,7 +49,7 @@ __all__ = [
     "run_test_files",
 ]
 
-_TEMPLATE_RE = re.compile(r"\$\{([^}]+)\}")
+_WHOLE_EXPRESSION_RE = re.compile(r"\A\{\{(.*)\}\}\Z", re.DOTALL)
 
 DEFAULT_ACCOUNT: dict[str, Any] = {"github": {"username": "testuser"}}
 
@@ -76,8 +78,8 @@ _ISSUE_DEFAULTS: dict[str, Any] = {
 
 # `merged` is not a declared GitHubPullRequest field, but the model allows
 # extra fields (real API responses always include it) - default it here so
-# expressions like `subject.merged || ...` don't hit a missing-attribute
-# error when a test case doesn't care about it.
+# expressions like `subject.merged or ...` don't hit a missing-attribute
+# error (StrictUndefined) when a test case doesn't care about it.
 _PULL_REQUEST_DEFAULTS: dict[str, Any] = {
     **_ISSUE_DEFAULTS,
     "draft": False,
@@ -89,7 +91,7 @@ _PULL_REQUEST_DEFAULTS: dict[str, Any] = {
 
 
 class TemplateResolutionError(ValueError):
-    """A `${...}` reference in a test file could not be resolved."""
+    """A `{{ ... }}` reference in a test file could not be resolved."""
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +116,7 @@ class RuleTestCase:
     # over the file-level `input:` block (see `RuleTestFile.input`).
     input: dict[str, Any] = field(default_factory=dict)
     # Raw (unvalidated) dict rather than `ExpectedResult`: `rule`/`action` may
-    # themselves contain `${parameter...}` references, so they're only
+    # themselves contain `{{ parameter... }}` references, so they're only
     # template-resolved and validated per parameter, inside `run_case`.
     expect: dict[str, Any]
 
@@ -167,39 +169,33 @@ class TestReport:
 # ---------------------------------------------------------------------------
 
 
-def _lookup_path(scope: dict[str, Any], path: str) -> Any:
-    parts = path.split(".")
-    current: Any = scope
-    for i, part in enumerate(parts):
-        if not isinstance(current, dict):
-            raise TemplateResolutionError(
-                f"Cannot resolve {path!r}: {'.'.join(parts[:i])!r} is not a mapping"
-            )
-        if part not in current:
-            raise TemplateResolutionError(
-                f"Unknown reference {path!r} (no key {part!r})"
-            )
-        current = current[part]
-    return current
-
-
 def resolve_config_templates(obj: Any, scope: dict[str, Any]) -> Any:
-    """Resolve `${...}` references in a (possibly nested) YAML value.
+    """Resolve `{{ ... }}` references in a (possibly nested) YAML value.
 
-    A string that is *exactly* `${expr}` is replaced by the resolved value,
-    keeping its real type (dict/list/scalar). A `${expr}` embedded in a longer
-    string is string-interpolated instead.
+    A string that is *exactly* `{{ expr }}` is replaced by the resolved
+    value, keeping its real type (dict/list/scalar/bool) via
+    `templating.evaluate`. A `{{ expr }}` embedded in a longer string is
+    rendered to text instead, same as a `notice`/`notify` template.
+
+    A string merely *starting* with `{{` and *ending* with `}}` isn't
+    necessarily a single expression - e.g. "{{ a }}{{ b }}" matches that
+    shape but is two adjacent templates, not one. Whole-expression
+    evaluation is tried first; a `TemplateSyntaxError` there means the
+    assumption was wrong, so it falls back to rendering the whole string as
+    a template instead of raising.
     """
     if isinstance(obj, str):
-        whole_match = _TEMPLATE_RE.fullmatch(obj)
-        if whole_match:
-            return _lookup_path(scope, whole_match.group(1).strip())
-        if "${" in obj:
-
-            def _replace(match: re.Match[str]) -> str:
-                return str(_lookup_path(scope, match.group(1).strip()))
-
-            return _TEMPLATE_RE.sub(_replace, obj)
+        whole_match = _WHOLE_EXPRESSION_RE.fullmatch(obj)
+        try:
+            if whole_match:
+                try:
+                    return templating.evaluate(whole_match.group(1).strip(), scope)
+                except jinja2.TemplateSyntaxError:
+                    pass
+            if "{{" in obj:
+                return templating.ENV.from_string(obj).render(scope)
+        except jinja2.TemplateError as exc:
+            raise TemplateResolutionError(f"Cannot resolve {obj!r}: {exc}") from exc
         return obj
     if isinstance(obj, dict):
         return {
@@ -214,8 +210,8 @@ def resolve_parameters(parameters: list[Any] | str | None, config: Config) -> li
     """Expand a case's `parameters` into a concrete list.
 
     `None` means the case isn't parameterized and runs once. A string must be
-    a whole `${...}` template resolving to a list (e.g. `${variables.spam_bots}`);
-    a list is used as-is.
+    a whole `{{ ... }}` template resolving to a list (e.g.
+    `{{ variables.spam_bots }}`); a list is used as-is.
     """
     if parameters is None:
         return [None]
@@ -291,7 +287,7 @@ def run_case(
         account = deep_merge(DEFAULT_ACCOUNT, merged_input.get("account") or {})
         scope["account"] = account
 
-        # `expect.rule`/`expect.action` may themselves reference `${parameter...}`
+        # `expect.rule`/`expect.action` may themselves reference `{{ parameter... }}`
         # (e.g. one case asserting a different rule per parameter), so they're
         # resolved and validated here, per parameter - separately from the
         # notification/subject build below, so a failure here is reported
@@ -328,7 +324,8 @@ def run_case(
 
             rule_matcher = RuleMatcher(
                 config.rules,
-                context={"account": account, "variables": config.variables},
+                account=account,
+                variables=config.variables,
             )
             matched = rule_matcher.find_matching_rule(
                 notification, lambda *_args, _subject=subject: _subject

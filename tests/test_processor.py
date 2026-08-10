@@ -119,7 +119,7 @@ def test_process_notifications_sends_notification_for_match(
         rules=[
             Rule(
                 id="issue_mention",
-                expression='notification.subject.type == "Issue" && notification.reason == "mention"',
+                expression='notification.subject.type == "Issue" and notification.reason == "mention"',
                 action=RuleAction(
                     notify=NotifyActionConfig(
                         title="Issue Mention", body="You were mentioned"
@@ -309,7 +309,7 @@ def test_process_notifications_account_username_from_provider(
             Rule(
                 id="assigned_to_me",
                 expression='notification.subject.type == "Issue"',
-                subject_expression="subject.assignees.exists(a, a.login == account.github.username)",
+                subject_expression="account.github.username in subject.assignees|map(attribute='login')",
                 action=RuleAction(mark_as_read=MarkAsReadActionConfig()),
             )
         ]

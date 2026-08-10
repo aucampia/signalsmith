@@ -16,7 +16,7 @@ resolves independently via `SIGNALSMITH_TEST_DIR`/`SIGNALSMITH_CONFIG_DIR`.
 
 ```yaml
 # Config file schema version (see Versioning below). Required.
-version: '2.0'
+version: '3.0'
 
 # Seconds between re-notifications for persistent unread items (default: 3600)
 renotify_interval: 3600
@@ -55,7 +55,7 @@ actions:
 
 rules:
   - id: 'issue_mention'
-    expression: 'notification.subject.type == "Issue" && notification.reason == "mention"'
+    expression: 'notification.subject.type == "Issue" and notification.reason == "mention"'
     action:
       notify:
         title: 'GitHub Issue Mention'
@@ -63,7 +63,7 @@ rules:
 
   - id: 'issue_assigned_to_me'
     expression: 'notification.subject.type == "Issue"'
-    subject_expression: 'subject.assignees.exists(a, a.login == account.github.username)'
+    subject_expression: "account.github.username in subject.assignees|map(attribute='login')"
     action:
       ref: notify_default
 
@@ -98,6 +98,43 @@ rules:
 - Each rule's `id` must be unique within the config.
 - A rule's `action` is either inline (`notify`/`mark_as_read`/`ignore`, exactly one) or a `ref` pointing at a name defined in the top-level `actions:` block — never both.
 
+## Rule Expressions Are Jinja
+
+`expression` and `subject_expression` are bare [Jinja](https://jinja.palletsprojects.com/)
+expressions (not `{{ }}`-wrapped templates) — the same engine `notice`/`notify`
+templates use, evaluated to a real Python value rather than rendered to text.
+`&&`/`||`/`!` become `and`/`or`/`not`; equality/comparison/`in` are unchanged.
+
+**Missing attributes raise.** Referencing something not present on the
+current notification/subject (e.g. `subject.merged` on an Issue) raises, and
+that one notification is reported as errored rather than silently not
+matching — same as a syntax error. Guard explicitly:
+
+- `subject.requested_reviewers|default([])` — supply a fallback value when a
+  field may be entirely absent from the fetched subject.
+- `subject.foo is defined` — check presence without supplying a fallback.
+
+**No `exists`/`all`/`has`/`size()` macros.** Use Jinja's built-in filters
+instead — `select`/`selectattr`/`rejectattr`/`map`/`in`/`length`. Two idioms
+come up often:
+
+- "any item matches": `items|select(...)|first is defined`
+- "no item fails a check": `items|reject(...)|first is undefined`
+
+There's no built-in prefix test, so signalsmith registers one custom Jinja
+test, `startingwith`, usable with `select`/`selectattr`:
+
+```yaml
+expression: >
+  variables.offtopic.prefixes|select('startingwith', notification.repository.full_name)|first is defined
+  or notification.repository.full_name in variables.offtopic.repos
+```
+
+Plain Python string methods also work directly (e.g.
+`notification.repository.full_name.startswith("a-")`), which is simpler than
+`startingwith` when checking against a single literal prefix rather than a
+list.
+
 ## Two-Stage Rule Evaluation
 
 Rules support an optional second evaluation stage for fields that require an extra API call:
@@ -120,16 +157,20 @@ Example — match assignees/reviewers without hardcoding a username:
 
 ```yaml
 subject_expression: >
-  subject.assignees.exists(a, a.login == account.github.username)
-  || (has(subject.requested_reviewers) ? subject.requested_reviewers.exists(r, r.login == account.github.username) : false)
+  account.github.username in
+  (subject.assignees + subject.requested_reviewers|default([]))|map(attribute='login')
 ```
+
+`requested_reviewers` isn't present on every subject type, hence
+`|default([])` — see [Rule Expressions Are Jinja](#rule-expressions-are-jinja)
+below for why a plain `is defined` guard doesn't work the same way here.
 
 Example — only match PRs I'm not a direct reviewer/assignee on:
 
 ```yaml
 - id: closed_pr_mark_as_read
   expression: 'notification.subject.type == "PullRequest"'
-  subject_expression: 'subject.merged || subject.state == "closed"'
+  subject_expression: 'subject.merged or subject.state == "closed"'
   action:
     mark_as_read: {}
 ```
@@ -153,8 +194,8 @@ variables:
 rules:
   - id: off_topic_mark_as_read
     expression: >
-      variables.offtopic.prefixes.exists(p, notification.repository.full_name.startsWith(p))
-      || notification.repository.full_name in variables.offtopic.repos
+      variables.offtopic.prefixes|select('startingwith', notification.repository.full_name)|first is defined
+      or notification.repository.full_name in variables.offtopic.repos
     action:
       mark_as_read: {}
 
@@ -165,7 +206,10 @@ rules:
       mark_as_read: {}
 ```
 
-Note that `notification.repository.org` is not itself a field available in expressions (it's derived in Python code, not part of the GitHub API payload) — derive it from `full_name` in expressions instead, e.g. `notification.repository.full_name.startsWith(g.org + "/")`.
+`notification.repository.org` (derived from `full_name`, not part of the raw
+GitHub API payload) is available directly in expressions — no need to
+re-derive it from `full_name` yourself, e.g.
+`notification.repository.org == g.org`.
 
 ## Testing Rules
 
@@ -220,9 +264,7 @@ template you're writing:
 - **`notice.title`/`notice.body`**: `notification`, `subject` (only if some
   rule's `subject_expression` already fetched one, or a template here
   references `subject` and it's fetchable - see below), `account`, `variables`
-  - same objects `expression`/`subject_expression` see (above), plus
-  `notification.subject.web_url` and `notification.repository.org`, which
-  aren't available in CEL expressions.
+  - the exact same objects `expression`/`subject_expression` see (above).
 - **`notify.title`/`notify.body`**: all of the above, **plus `notice`**
   (`notice.title`, `notice.body`) - the already-rendered generic notice.
 

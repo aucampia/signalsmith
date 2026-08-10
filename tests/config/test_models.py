@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from signalsmith.config.models import Config, IgnoreActionConfig, Rule, RuleAction
 from signalsmith.versioning import VersionError
@@ -28,7 +29,7 @@ def test_config_load_without_version_key_is_refused(tmp_path: Path) -> None:
 
 
 def test_config_load_wrong_major_is_refused(tmp_path: Path) -> None:
-    config_path = _write_config(tmp_path, "version: '1.0'\n" + _MINIMAL_RULES)
+    config_path = _write_config(tmp_path, "version: '2.0'\n" + _MINIMAL_RULES)
     with pytest.raises(VersionError) as exc_info:
         Config.load(config_path)
     assert "Update the config file" in str(exc_info.value)
@@ -36,7 +37,7 @@ def test_config_load_wrong_major_is_refused(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
     ("version", "expect_warning"),
-    [("2.0", False), ("2.9", True)],
+    [("3.0", False), ("3.9", True)],
     ids=["matching", "newer-minor"],
 )
 def test_config_load_compatible_version_loads(
@@ -61,7 +62,25 @@ def test_config_default_version_is_current() -> None:
             )
         ]
     )
-    assert str(config.version) == "2.0"
+    assert str(config.version) == "3.0"
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"expression": "a == && b"},
+        {"expression": "true", "subject_expression": "a == && b"},
+    ],
+    ids=["expression", "subject_expression"],
+)
+def test_rule_rejects_invalid_expression_syntax_at_load_time(
+    kwargs: dict[str, str],
+) -> None:
+    """A Jinja syntax error is caught by `Rule`'s own validator - it must not
+    wait until `RuleMatcher` compiles it mid-run."""
+    with pytest.raises(ValidationError) as exc_info:
+        Rule(id="bad", action=RuleAction(ignore=IgnoreActionConfig()), **kwargs)
+    assert "bad" in str(exc_info.value)
 
 
 def _clear_path_env(monkeypatch: pytest.MonkeyPatch) -> None:

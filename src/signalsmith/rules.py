@@ -1,17 +1,12 @@
-import json
 import logging
 from collections.abc import Callable
 from typing import Any
 
-import celpy
+import jinja2
 
+from . import templating
 from .config.models import Rule
-from .github.models import (
-    GITHUB_NOTIFICATION_ADAPTER,
-    GitHubIssue,
-    GitHubNotification,
-    GitHubPullRequest,
-)
+from .github.models import GitHubIssue, GitHubNotification, GitHubPullRequest
 
 logger = logging.getLogger(__name__)
 
@@ -20,47 +15,18 @@ __all__: list[str] = []
 
 class RuleMatcher:
     def __init__(
-        self, rules: list[Rule], context: dict[str, Any] | None = None
+        self, rules: list[Rule], *, account: dict[str, Any], variables: dict[str, Any]
     ) -> None:
-        """Compile rules.
+        """Store rules for matching.
 
         Args:
-            rules: Rules to compile.
-            context: Extra top-level variables merged into every expression's
-                activation alongside `notification`/`subject` (e.g. `account`).
+            rules: Rules to match, in priority order.
+            account: The `account` name available to every expression.
+            variables: The `variables` name available to every expression.
         """
-        self._context = context or {}
-        env = celpy.Environment()
-        self._compiled: list[tuple[Rule, celpy.Runner, celpy.Runner | None]] = []
-        for rule in rules:
-            try:
-                # Compile expression
-                ast = env.compile(rule.expression)
-                program = env.program(ast)
-
-                # Compile subject_expression if present
-                subject_program = None
-                if rule.subject_expression:
-                    subject_ast = env.compile(rule.subject_expression)
-                    subject_program = env.program(subject_ast)
-                    logger.debug(
-                        "Compiled rule %r expression: %s, subject_expression: %s",
-                        rule.id,
-                        rule.expression,
-                        rule.subject_expression,
-                    )
-                else:
-                    logger.debug("Compiled rule %r: %s", rule.id, rule.expression)
-
-                self._compiled.append((rule, program, subject_program))
-            except Exception:
-                logger.exception(
-                    "Failed to compile rule %r: expression=%s, subject_expression=%s",
-                    rule.id,
-                    rule.expression,
-                    rule.subject_expression,
-                )
-                raise
+        self._rules = rules
+        self._account = account
+        self._variables = variables
 
     def find_matching_rule(
         self,
@@ -78,18 +44,14 @@ class RuleMatcher:
         Returns:
             First matching rule or None
         """
-        # Build CEL activation from notification JSON
-        notification_dict = GITHUB_NOTIFICATION_ADAPTER.dump_python(
-            notification, mode="json"
-        )
-        activation: Any = celpy.json_to_cel(  # type: ignore[attr-defined]
-            {"notification": notification_dict, **self._context}
+        context = templating.build_context(
+            notification, None, self._account, self._variables
         )
 
         skipped: list[str] = []
         matched_rule: Rule | None = None
 
-        for rule, program, subject_program in self._compiled:
+        for rule in self._rules:
             logger.debug(
                 "Evaluating rule %r for notification %s",
                 rule.id,
@@ -97,13 +59,13 @@ class RuleMatcher:
             )
             # Stage 1: Evaluate expression against notification
             try:
-                result = program.evaluate(activation)
+                result = templating.evaluate(rule.expression, context)
                 if not result:
                     skipped.append(rule.id)
                     continue  # Stage 1 failed, skip this rule
-            except celpy.CELEvalError as e:  # type: ignore[attr-defined]
+            except jinja2.TemplateError as e:
                 raise RuntimeError(
-                    f"CEL evaluation error for rule {rule.id!r} expression on notification {notification.id}:\n"
+                    f"Jinja expression error for rule {rule.id!r} expression on notification {notification.id}:\n"
                     f"  Error: {e}\n"
                     f"  Expression: {rule.expression}\n"
                     f"  Notification: {notification.debug_info}"
@@ -117,7 +79,7 @@ class RuleMatcher:
                 ) from e
 
             # If no subject_expression, stage 1 match is sufficient
-            if subject_program is None:
+            if not rule.subject_expression:
                 matched_rule = rule
                 break
 
@@ -149,23 +111,18 @@ class RuleMatcher:
                     f"  Notification: {notification.debug_info}"
                 ) from e
 
-            subject_dict = json.loads(subject.model_dump_json())
-
-            # Create activation with BOTH notification and subject
-            combined_activation: Any = celpy.json_to_cel(  # type: ignore[attr-defined]
-                {
-                    "notification": notification_dict,
-                    "subject": subject_dict,
-                    **self._context,
-                }
+            combined_context = templating.build_context(
+                notification, subject, self._account, self._variables
             )
 
             # Evaluate subject_expression
             try:
-                subject_result = subject_program.evaluate(combined_activation)
-            except celpy.CELEvalError as e:  # type: ignore[attr-defined]
+                subject_result = templating.evaluate(
+                    rule.subject_expression, combined_context
+                )
+            except jinja2.TemplateError as e:
                 raise RuntimeError(
-                    f"CEL evaluation error for rule {rule.id!r} subject_expression on notification {notification.id}:\n"
+                    f"Jinja expression error for rule {rule.id!r} subject_expression on notification {notification.id}:\n"
                     f"  Error: {e}\n"
                     f"  Expression: {rule.subject_expression}\n"
                     f"  Subject type: {notification.subject.type}\n"

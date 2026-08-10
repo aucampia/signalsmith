@@ -2,7 +2,7 @@
 
 signalsmith is a programmable notification manager that filters GitHub notifications
 (and eventually other platforms like Jira) to reduce spam. It pulls unread
-notifications, filters them using CEL expression rules, auto-dismisses what you
+notifications, filters them using Jinja expression rules, auto-dismisses what you
 don't care about, and alerts only on what matters.
 
 ## Documentation
@@ -99,7 +99,7 @@ unrelated to each other and to the package version in `pyproject.toml`.
   `GitHubPullRequest`) stay `BaseModel` — pydantic dataclasses accept extra
   fields on validation but silently drop them on every dump, with no config
   flag to fix it, and these fields (e.g. `merged` on PRs) need to round-trip
-  for CEL rule expressions and spool/debug JSON. This exception is scoped via
+  for Jinja rule expressions and spool/debug JSON. This exception is scoped via
   `per-file-ignores` in `pyproject.toml`; don't extend it to other files.
 
 ## Testing

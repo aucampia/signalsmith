@@ -1,4 +1,4 @@
-"""Logging setup for the CLI: format, celpy noise suppression, debug dump."""
+"""Logging setup for the CLI: format, debug dump."""
 
 import logging
 import os
@@ -8,32 +8,6 @@ from typing import Any
 import yaml
 
 __all__ = ["dump_logging_config", "setup_logging"]
-
-
-class _SuppressCelPyFilter(logging.Filter):
-    """Filter out noisy celpy logging - only show WARNING and above."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        # Check if log comes from celpy module (by pathname or logger name)
-        is_celpy = "celpy" in record.pathname or any(
-            record.name.startswith(prefix)
-            for prefix in (
-                "celpy",
-                "Environment",
-                "NameContainer",
-                "evaluation",
-                "Evaluator",
-                "InterpretedRunner",
-                "celtypes",
-            )
-        )
-
-        if is_celpy:
-            # Only allow WARNING and above from celpy
-            return record.levelno >= logging.WARNING
-
-        # Allow all other logs
-        return True
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -48,11 +22,6 @@ def setup_logging(verbose: bool = False) -> None:
             "%(name)-12s %(module)s:%(lineno)s:%(funcName)s %(message)s"
         ),
     )
-
-    # Add filter to ALL handlers to block celpy noise
-    celpy_filter = _SuppressCelPyFilter()
-    for handler in logging.root.handlers:
-        handler.addFilter(celpy_filter)
 
     # httpx logs one INFO line per HTTP request; too noisy for normal runs.
     if not verbose:
