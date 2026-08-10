@@ -39,12 +39,8 @@ signalsmith/
 │   │   ├── models.py             # SpoolEntry, SpoolNotifyEvent, IgnoredEntry
 │   │   ├── spool.py              # Notified-notification spool (also drives renotify suppression)
 │   │   └── ignore_store.py       # Permanent-ignore store (the notification "Ignore" button)
-│   ├── notification/             # Cross-cutting notification vocabulary
-│   │   └── models.py             # NotificationOutcome
-│   └── examples/                 # Example config YAMLs (see README.md)
-│       ├── example-config.yaml
-│       ├── example-config-with-actions.yaml
-│       └── config-example-orgs.yaml
+│   └── notification/             # Cross-cutting notification vocabulary
+│       └── models.py             # NotificationOutcome
 ├── tests/                # pytest test suite, mirroring src/signalsmith/ packages
 │   ├── app/
 │   │   ├── test_context.py
@@ -71,7 +67,6 @@ signalsmith/
 │   ├── test_notify_dispatcher.py
 │   ├── test_processor.py
 │   ├── test_templating.py
-│   ├── test_example_configs.py
 │   └── test_versioning.py
 ├── doc/                  # Reference documentation
 │   ├── config.md         # Configuration file reference
@@ -170,11 +165,6 @@ uv run signalsmith daemon --poll-interval 300
 - Aim for good coverage of core logic (CEL filters, processing, API client)
 
 ## Configuration Files
-
-Example config files live in `src/signalsmith/examples/`:
-- `example-config.yaml` - Comprehensive feature showcase
-- `example-config-with-actions.yaml` - Reusable action definitions
-- `config-example-orgs.yaml` - Organization filtering patterns
 
 User configs go in `~/.config/signalsmith/config.yaml` (not tracked in git).
 
