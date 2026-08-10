@@ -84,6 +84,10 @@ tasks:
         if [ -n "$files" ]; then
           mise exec -- shellcheck $files
         fi
+  license:fetch:
+    desc: Fetch the canonical CC0-1.0 license text into LICENSE
+    cmds:
+      - uvx reuse download -o LICENSE CC0-1.0
   pip-audit:
     desc: Run pip audit
     cmds:
