@@ -24,7 +24,12 @@ from ..config.models import (
 from ..github.models import GitHubIssue, GitHubNotification, GitHubPullRequest
 from ..protocols import NotificationProvider
 from ..state.spool import SpoolManager
-from ..templating import build_context, render_notice, render_notify, template_names
+from ..templating import (
+    build_context,
+    references_subject,
+    render_notice,
+    render_notify,
+)
 from .base import Action, ActionKind
 from .ignore import IgnoreAction
 from .mark_as_read import MarkAsReadAction
@@ -73,7 +78,10 @@ def _resolve_subject_for_templates(
     `subject`-referencing template is expected to fail - passed through to
     `templating.render` so that failure logs at WARNING (config is fine, this
     notification just has no subject to offer) rather than ERROR (ambiguous
-    - could be a template typo).
+    - could be a template typo). Uses `references_subject` rather than
+    `template_names` directly so a template with a syntax error can't crash
+    action construction here - it still surfaces as an ERROR later, when
+    `render` itself tries to compile it.
     """
     if ctx.subject is not None:
         return ctx.subject, None
@@ -83,17 +91,19 @@ def _resolve_subject_for_templates(
         sources.append(action_config.title)
     if action_config.body is not None:
         sources.append(action_config.body)
-    if not any("subject" in template_names(source) for source in sources):
+    if not any(references_subject(source) for source in sources):
         return None, None
+
+    subject_url = ctx.notification.subject.url
+    if subject_url is None:
+        return None, "notification has no subject URL"
 
     if ctx.fetch_subject is None:
         return None, "no subject fetcher available"
 
     try:
         subject = ctx.fetch_subject(
-            ctx.notification.subject.url or "",
-            ctx.notification.subject.type,
-            ctx.notification.updated_at,
+            subject_url, ctx.notification.subject.type, ctx.notification.updated_at
         )
     except NotImplementedError:
         return (

@@ -702,3 +702,79 @@ def test_process_notifications_bad_notice_template_falls_back_at_error(
     outcome, _action = actions[0]
     assert outcome == NotificationOutcome.NOTIFIED
     assert any(r.levelno == logging.ERROR for r in caplog.records)
+
+
+def test_process_notifications_syntax_error_template_does_not_crash(
+    sample_notification: GitHubNotification,
+    spool_manager: SpoolManager,
+    ignore_store: IgnoreStore,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Regression test: a `notice` template with a Jinja syntax error must
+    not crash action construction (previously `_resolve_subject_for_templates`
+    called `template_names` unguarded) - it falls back and logs at ERROR
+    like any other broken template, and the notification still goes out."""
+    config = Config(
+        notice=NoticeConfig(title="{{ subject.user.login"),  # unterminated
+        rules=[
+            Rule(
+                id="issue_notify",
+                expression='notification.subject.type == "Issue"',
+                action=RuleAction(notify=NotifyActionConfig()),
+            )
+        ],
+    )
+    provider = MockProvider([sample_notification])
+
+    with caplog.at_level(logging.WARNING):
+        actions = list(
+            create_actions(config, provider, spool_manager, ignore_store=ignore_store)
+        )
+
+    assert len(actions) == 1
+    outcome, _action = actions[0]
+    assert outcome == NotificationOutcome.NOTIFIED
+    assert any(r.levelno == logging.ERROR for r in caplog.records)
+
+
+def test_process_notifications_no_subject_url_skips_fetch(
+    spool_manager: SpoolManager,
+    ignore_store: IgnoreStore,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Regression test: when the notification has no subject URL,
+    `_resolve_subject_for_templates` must not call the provider at all -
+    that's an expected gap, not a fetch attempt with a bogus empty URL."""
+    notification = GitHubNotification(
+        id="1",
+        reason="mention",
+        unread=True,
+        updated_at="2026-06-17T00:00:00Z",
+        subject=GitHubSubject(title="Test", type="Issue", url=None),
+        repository=GitHubRepository(id=1, name="repo", full_name="owner/repo"),
+        url="https://api.github.com/notifications/threads/1",
+        subscription_url="https://api.github.com/notifications/threads/1/subscription",
+    )
+    config = Config(
+        notice=NoticeConfig(body="By {{ subject.user.login }}"),
+        rules=[
+            Rule(
+                id="issue_notify",
+                expression='notification.subject.type == "Issue"',
+                action=RuleAction(notify=NotifyActionConfig()),
+            )
+        ],
+    )
+    provider = MockProvider([notification])
+
+    with caplog.at_level(logging.WARNING):
+        actions = list(
+            create_actions(config, provider, spool_manager, ignore_store=ignore_store)
+        )
+
+    assert provider.subjects_fetched == []
+    assert len(actions) == 1
+    outcome, _action = actions[0]
+    assert outcome == NotificationOutcome.NOTIFIED
+    assert not any(r.levelno == logging.ERROR for r in caplog.records)
+    assert any(r.levelno == logging.WARNING for r in caplog.records)

@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "Notice",
     "build_context",
+    "references_subject",
     "render_notice",
     "render_notify",
     "template_names",
@@ -68,8 +69,28 @@ def template_names(source: str) -> set[str]:
 
     Used to decide whether a `subject` fetch is needed before rendering, so a
     config whose templates never mention `subject` never pays for one.
+
+    Raises `jinja2.TemplateError` on a syntax error - callers that need a
+    safe check (does this specific template need `subject`?) should use
+    `references_subject` instead, which tolerates that.
     """
     return jinja2.meta.find_undeclared_variables(ENV.parse(source))
+
+
+def references_subject(source: str) -> bool:
+    """Whether `source` references `subject`, tolerating a syntax error.
+
+    Used both to decide whether an on-demand subject fetch is needed
+    (`actions.registry._resolve_subject_for_templates`) and to scope the
+    WARNING/ERROR split in `render` to templates that actually reference
+    `subject` - a template this can't even parse is always a genuine
+    problem, so it's treated as "doesn't reference subject" here and
+    surfaces as an ERROR when `render` itself tries to compile it.
+    """
+    try:
+        return "subject" in template_names(source)
+    except jinja2.TemplateError:
+        return False
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -95,17 +116,18 @@ def render(
     stray leading/trailing whitespace that has no place in a single-line
     desktop-notification title.
 
-    `expected_failure`, when given, names a reason this render was already
-    known to be at risk of failing (e.g. "subject type Release has no
-    fetchable object") - logged at WARNING instead of ERROR, since nothing is
-    wrong with the config in that case. Every other `TemplateError` (a typo, a
-    bad filter, a syntax error) is a genuine config problem and logged at
-    ERROR.
+    `expected_failure`, when given, names a reason `source` was already known
+    to be at risk of failing because it references `subject` (e.g. "subject
+    type Release has no fetchable object") - logged at WARNING instead of
+    ERROR, but only if `source` actually references `subject`
+    (`references_subject`); otherwise the failure is unrelated (a typo, a bad
+    filter, a syntax error) and is always a genuine config problem, logged at
+    ERROR regardless of `expected_failure`.
     """
     try:
         rendered = _compile(source).render(dict(context))
     except jinja2.TemplateError as exc:
-        if expected_failure is not None:
+        if expected_failure is not None and references_subject(source):
             logger.warning(
                 "Template %r could not render (%s), using fallback: %s",
                 label,

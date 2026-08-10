@@ -12,6 +12,7 @@ from signalsmith.github.models import (
 )
 from signalsmith.templating import (
     build_context,
+    references_subject,
     render,
     render_notice,
     render_notify,
@@ -115,6 +116,57 @@ class TestRender:
             expected_failure="subject type Release has no fetchable object",
         )
         assert result == "123"
+
+    def test_expected_failure_ignored_on_syntax_error(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A syntax error is always ERROR, even with `expected_failure` set -
+        `references_subject` can't even parse it, so it never qualifies for
+        the WARNING downgrade."""
+        with caplog.at_level(logging.WARNING):
+            result = render(
+                "{{ subject.user.login",
+                {},
+                label="my.label",
+                fallback="fallback",
+                expected_failure="subject type Release has no fetchable object",
+            )
+        assert result == "fallback"
+        assert len(caplog.records) == 1
+        assert caplog.records[0].levelno == logging.ERROR
+
+    def test_expected_failure_ignored_when_template_does_not_reference_subject(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Regression test: `expected_failure` must not downgrade a failure
+        in a template that never references `subject` - that failure is
+        unrelated to the subject fetch and is a genuine problem (e.g. a
+        typo), so it must still log at ERROR."""
+        with caplog.at_level(logging.WARNING):
+            result = render(
+                "{{ notification.nonexistent }}",
+                {"notification": {}},
+                label="my.label",
+                fallback="fallback",
+                expected_failure="subject type Release has no fetchable object",
+            )
+        assert result == "fallback"
+        assert len(caplog.records) == 1
+        assert caplog.records[0].levelno == logging.ERROR
+
+
+class TestReferencesSubject:
+    def test_true_when_subject_referenced(self) -> None:
+        assert references_subject("{{ subject.user.login }}") is True
+
+    def test_false_when_not_referenced(self) -> None:
+        assert references_subject("{{ notification.id }}") is False
+
+    def test_false_on_syntax_error(self) -> None:
+        """A template that can't even be parsed is never treated as
+        'references subject' - it's always a genuine problem, surfaced as an
+        ERROR by `render` rather than silently downgraded."""
+        assert references_subject("{{ subject.user.login") is False
 
 
 class TestTemplateNames:
