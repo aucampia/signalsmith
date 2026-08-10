@@ -1,7 +1,7 @@
 """The single table mapping each `ActionKind` to how it's built.
 
 This is the extension point: adding a new configurable action kind means
-adding a value to `ActionKind` (`base.py`), a field to `ActionDefinition`
+adding a value to `config.models.ActionKind` (`config/models.py`), a field to `ActionDefinition`
 and `RuleAction` (`config/models.py`), an action class, and one entry here.
 Nothing else needs to know the kind exists - `factory.resolve_action_config`
 resolves ref-vs-inline generically by iterating `ACTION_SPECS`, and
