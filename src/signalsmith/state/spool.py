@@ -21,8 +21,9 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from xdg import xdg_cache_home, xdg_data_home
+from xdg import xdg_data_home
 
+from ..cache import resolve_cache_dir
 from ..config.models import Config, Rule
 from ..github.models import GitHubIssue, GitHubNotification, GitHubPullRequest
 from ..versioning import STATE_VERSION, ensure_store_version
@@ -34,39 +35,6 @@ __all__: list[str] = []
 
 _MAX_NOTIFY_EVENTS = 20
 _SANITIZE_RE = re.compile(r"[^A-Za-z0-9._-]")
-
-
-def resolve_state_dir() -> Path:
-    """Resolve the state root directory (holds the spool and its version marker).
-
-    Not configurable, unlike `spool.dir`: it's the anchor for the state
-    directory's version marker and for a future second state store.
-    """
-    return xdg_data_home() / "signalsmith"
-
-
-def ensure_state_version(state_dir: Path) -> None:
-    """Ensure the state root's version marker is compatible with this signalsmith."""
-    ensure_store_version(
-        state_dir,
-        STATE_VERSION,
-        label="State",
-        clean_command="signalsmith state clean",
-    )
-
-
-def resolve_spool_dir(config: Config) -> Path:
-    """Resolve the spool directory (explicit config > XDG data default)."""
-    return config.spool.dir or (xdg_data_home() / "signalsmith" / "spool")
-
-
-def resolve_spool_trash_dir() -> Path:
-    """Resolve the spool trash directory.
-
-    Deliberately not configurable and always under the cache dir
-    (regardless of `spool.dir`), so `signalsmith cache clean` always sweeps it.
-    """
-    return xdg_cache_home() / "signalsmith" / "trash" / "spool"
 
 
 def _sanitize(value: str) -> str:
@@ -86,6 +54,40 @@ class SpoolManager:
         self._spool_dir.mkdir(parents=True, exist_ok=True)
         self._index: dict[tuple[str, str], _Loaded] = {}
         self._load_all()
+
+    @staticmethod
+    def resolve_state_dir() -> Path:
+        """Resolve the state root directory (holds the spool and its version marker).
+
+        Not configurable, unlike `spool.dir`: it's the anchor for the state
+        directory's version marker and for a second state store
+        (`state.ignore_store.IgnoreStore`).
+        """
+        return xdg_data_home() / "signalsmith"
+
+    @classmethod
+    def ensure_state_version(cls, state_dir: Path | None = None) -> None:
+        """Ensure the state root's version marker is compatible with this signalsmith."""
+        ensure_store_version(
+            state_dir if state_dir is not None else cls.resolve_state_dir(),
+            STATE_VERSION,
+            label="State",
+            clean_command="signalsmith state clean",
+        )
+
+    @staticmethod
+    def resolve_spool_dir(config: Config) -> Path:
+        """Resolve the spool directory (explicit config > XDG data default)."""
+        return config.spool.dir or (xdg_data_home() / "signalsmith" / "spool")
+
+    @staticmethod
+    def resolve_trash_dir() -> Path:
+        """Resolve the spool trash directory.
+
+        Deliberately not configurable and always under the cache dir
+        (regardless of `spool.dir`), so `signalsmith cache clean` always sweeps it.
+        """
+        return resolve_cache_dir() / "trash" / "spool"
 
     def _load_all(self) -> None:
         for path in sorted(self._spool_dir.glob("*.json")):

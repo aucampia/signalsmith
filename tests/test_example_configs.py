@@ -1,4 +1,4 @@
-"""Validate the example config files shipped in src/signalsmith/.
+"""Validate the example config files shipped in src/signalsmith/examples/.
 
 These files are referenced from README.md/CONTRIBUTING.md as copy-paste starting
 points, so they must both parse as valid Config objects and render their notify
@@ -37,7 +37,7 @@ _SAMPLE_NOTIFICATION = GitHubNotification(
 
 
 def _example_config_path(filename: str) -> Path:
-    return Path(str(importlib.resources.files("signalsmith") / filename))
+    return Path(str(importlib.resources.files("signalsmith.examples") / filename))
 
 
 @pytest.mark.parametrize("filename", EXAMPLE_CONFIG_FILENAMES)

@@ -4,18 +4,15 @@ import logging
 from collections.abc import Iterable
 from typing import Any
 
-from .actions import (
-    Action,
-    IgnoreAction,
-    MarkAsReadAction,
-    NotifyAction,
-    NotifyRuntime,
-    RunStats,
-    SkipAction,
-    create_action_for_rule,
-)
+from .actions import Action, NotifyRuntime, create_action_for_rule
 from .cel_rules import RuleMatcher
-from .config.models import Config, DefaultAction, NotifyActionConfig
+from .config.models import (
+    Config,
+    DefaultAction,
+    IgnoreActionConfig,
+    NotifyActionConfig,
+    RuleAction,
+)
 from .github.models import (
     GITHUB_NOTIFICATION_ADAPTER,
     GitHubIssue,
@@ -26,10 +23,13 @@ from .notification.models import NotificationOutcome
 from .protocols import NotificationProvider
 from .state.ignore_store import IgnoreStore
 from .state.spool import SpoolManager
+from .stats import RunStats
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["build_account_context", "create_actions"]
+
+DEFAULT_RULE_ID = "__default__"
 
 
 def build_account_context(provider: NotificationProvider) -> dict[str, Any]:
@@ -37,18 +37,21 @@ def build_account_context(provider: NotificationProvider) -> dict[str, Any]:
     return {"github": {"username": provider.get_authenticated_user()}}
 
 
-def action_to_outcome(action: Action) -> NotificationOutcome:
-    """Determine the outcome from an action instance."""
-    if isinstance(action, NotifyAction):
-        return NotificationOutcome.NOTIFIED
-    elif isinstance(action, MarkAsReadAction):
-        return NotificationOutcome.MARKED_AS_READ
-    elif isinstance(action, IgnoreAction):
-        return NotificationOutcome.IGNORED
-    elif isinstance(action, SkipAction):
-        return NotificationOutcome.SKIPPED
-    else:
-        raise ValueError(f"Unknown action type: {type(action)}")
+def default_rule_action(config: Config, notification: GitHubNotification) -> RuleAction:
+    """Build the `RuleAction` a notification falls back to when no rule matches.
+
+    Synthesized rather than a special case: routing it through the same
+    `create_action_for_rule` as a matched rule means the notify/skip
+    decision (renotify interval) is made in exactly one place.
+    """
+    if config.default_action == DefaultAction.NOTIFY:
+        return RuleAction(
+            notify=NotifyActionConfig(
+                title=f"{notification.subject.type}: {notification.subject.title}",
+                message=f"{notification.repository.full_name} ({notification.reason})",
+            )
+        )
+    return RuleAction(ignore=IgnoreActionConfig())
 
 
 def create_actions(
@@ -200,55 +203,27 @@ def create_actions(
             yield (NotificationOutcome.FILTERED_ERROR, None)
             continue
 
-        if rule:
-            # Create the appropriate action based on the matched rule
-            action = create_action_for_rule(
-                notification,
-                rule,
-                provider,
-                spool,
-                config,
-                force,
-                subject=fetched_subject,
-                notify_runtime=notify_runtime,
-            )
-        else:
-            # Create action based on default_action
-            if config.default_action == DefaultAction.NOTIFY:
-                # Create default notify action
-                should_notify = force or spool.should_notify(
-                    provider.name, notification.id, config.renotify_interval
-                )
-                if should_notify:
-                    default_notify_config = NotifyActionConfig(
-                        title=f"{notification.subject.type}: {notification.subject.title}",
-                        message=f"{notification.repository.full_name} ({notification.reason})",
-                    )
-                    action = NotifyAction(
-                        notification,
-                        default_notify_config,
-                        spool,
-                        "__default__",
-                        rule=None,
-                        subject=fetched_subject,
-                        provider_name=provider.name,
-                        notify_runtime=notify_runtime,
-                    )
-                else:
-                    # Skip if renotify interval not elapsed
-                    logger.debug(
-                        "Notification %s default notify skipped (renotify interval not elapsed)",
-                        notification.debug_info,
-                    )
-                    yield (NotificationOutcome.SKIPPED, None)
-                    continue
-            else:  # DefaultAction.IGNORE
-                action = IgnoreAction(notification, "__default__")
+        rule_action = (
+            rule.action
+            if rule is not None
+            else default_rule_action(config, notification)
+        )
+        action = create_action_for_rule(
+            notification,
+            rule_action,
+            rule.id if rule is not None else DEFAULT_RULE_ID,
+            provider,
+            spool,
+            config,
+            force,
+            subject=fetched_subject,
+            rule=rule,
+            notify_runtime=notify_runtime,
+        )
 
         logger.debug(
             "Created action for notification %s: %s",
             notification.debug_info,
             action.__class__.__name__,
         )
-        outcome = action_to_outcome(action)
-        yield (outcome, action)
+        yield (action.outcome, action)

@@ -5,8 +5,10 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
+from signalsmith.actions import resolve_action_config
 from signalsmith.config.models import (
     ActionDefinition,
+    ActionKind,
     Config,
     DefaultAction,
     IgnoreActionConfig,
@@ -22,7 +24,6 @@ from signalsmith.config.testing import (
     build_notification,
     build_subject,
     deep_merge,
-    effective_action_kind,
     resolve_config_templates,
     resolve_parameters,
     run_case,
@@ -203,29 +204,36 @@ def test_build_subject_pull_request_override_merged() -> None:
 
 
 # ---------------------------------------------------------------------------
-# effective_action_kind
+# resolve_action_config
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
     ("action", "expected_kind"),
     [
-        (RuleAction(notify=NotifyActionConfig(title="t", message="m")), "notify"),
-        (RuleAction(mark_as_read=MarkAsReadActionConfig()), "mark_as_read"),
+        (
+            RuleAction(notify=NotifyActionConfig(title="t", message="m")),
+            ActionKind.NOTIFY,
+        ),
+        (RuleAction(mark_as_read=MarkAsReadActionConfig()), ActionKind.MARK_AS_READ),
     ],
     ids=["notify", "mark_as_read"],
 )
-def test_effective_action_kind_inline(action: RuleAction, expected_kind: str) -> None:
+def test_resolve_action_config_inline(
+    action: RuleAction, expected_kind: ActionKind
+) -> None:
     config = _config_with_variables({})
-    assert effective_action_kind(action, config) == expected_kind
+    kind, _ = resolve_action_config(action, config)
+    assert kind == expected_kind
 
 
-def test_effective_action_kind_ref() -> None:
+def test_resolve_action_config_ref() -> None:
     config = Config(
         actions={"dismiss": ActionDefinition(ignore=IgnoreActionConfig())},
         rules=[Rule(id="noop", expression="true", action=RuleAction(ref="dismiss"))],
     )
-    assert effective_action_kind(RuleAction(ref="dismiss"), config) == "ignore"
+    kind, _ = resolve_action_config(RuleAction(ref="dismiss"), config)
+    assert kind == ActionKind.IGNORE
 
 
 # ---------------------------------------------------------------------------

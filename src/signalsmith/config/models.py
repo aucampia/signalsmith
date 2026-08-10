@@ -24,6 +24,23 @@ class DefaultAction(StrEnum):
     IGNORE = "ignore"
 
 
+class ActionKind(StrEnum):
+    """Configurable action kinds - the values users write in YAML.
+
+    Every member's value must match a field name shared by `ActionDefinition`
+    and `RuleAction` below - `validate_exactly_one` on both, and
+    `actions.registry.ACTION_SPECS`, iterate this enum rather than hardcoding
+    the three kinds by name. Deliberately excludes `SkipAction`
+    (`actions/skip.py`): skipping is what a `notify` action degrades to when
+    the renotify interval hasn't elapsed, never something a user configures
+    directly.
+    """
+
+    NOTIFY = "notify"
+    MARK_AS_READ = "mark_as_read"
+    IGNORE = "ignore"
+
+
 @dataclass(kw_only=True)
 class NotifyActionConfig:
     title: str
@@ -50,13 +67,7 @@ class ActionDefinition:
 
     @model_validator(mode="after")
     def validate_exactly_one(self) -> Self:
-        n = sum(
-            [
-                self.notify is not None,
-                self.mark_as_read is not None,
-                self.ignore is not None,
-            ]
-        )
+        n = sum(getattr(self, kind.value) is not None for kind in ActionKind)
         if n != 1:
             raise ValueError(
                 "Exactly one of 'notify', 'mark_as_read', or 'ignore' must be set"
@@ -76,13 +87,7 @@ class RuleAction:
     @model_validator(mode="after")
     def validate_exactly_one(self) -> Self:
         has_ref = self.ref is not None
-        has_inline = sum(
-            [
-                self.notify is not None,
-                self.mark_as_read is not None,
-                self.ignore is not None,
-            ]
-        )
+        has_inline = sum(getattr(self, kind.value) is not None for kind in ActionKind)
         if has_ref and has_inline > 0:
             raise ValueError(
                 "Cannot specify both 'ref' and inline action (notify/mark_as_read/ignore)"

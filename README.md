@@ -98,11 +98,11 @@ rules:
 
 ### Example Configurations
 
-See `src/signalsmith/` for detailed examples:
+See `src/signalsmith/examples/` for detailed examples:
 
-- **[example-config.yaml](src/signalsmith/example-config.yaml)** - Full feature showcase with comments
-- **[example-config-with-actions.yaml](src/signalsmith/example-config-with-actions.yaml)** - Reusable action definitions
-- **[config-example-orgs.yaml](src/signalsmith/config-example-orgs.yaml)** - Organization filtering patterns
+- **[example-config.yaml](src/signalsmith/examples/example-config.yaml)** - Full feature showcase with comments
+- **[example-config-with-actions.yaml](src/signalsmith/examples/example-config-with-actions.yaml)** - Reusable action definitions
+- **[config-example-orgs.yaml](src/signalsmith/examples/config-example-orgs.yaml)** - Organization filtering patterns
 
 ## Testing Your Rules
 

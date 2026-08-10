@@ -1,8 +1,11 @@
 # CLI Reference
 
 ```
-signalsmith [--verbose / -v]  run | daemon | test | cache clean | spool list | spool clean | state clean | ignore list | ignore remove | ignore clear
+signalsmith  run | daemon | test | cache clean | spool list | spool clean | state clean | ignore list | ignore remove | ignore clear
 ```
+
+Every command accepts its own `--verbose`/`-v` (there is no global flag
+before the command name).
 
 ## `run`
 

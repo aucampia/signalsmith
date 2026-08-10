@@ -11,6 +11,7 @@ from signalsmith.github.models import (
     GitHubRepository,
     GitHubSubject,
 )
+from signalsmith.notification.models import NotificationOutcome
 from signalsmith.state.spool import SpoolManager
 
 
@@ -52,13 +53,20 @@ def make_action(
     )
 
 
+def test_outcome_is_notified(
+    notification: GitHubNotification, spool: SpoolManager
+) -> None:
+    action = make_action(notification, spool)
+    assert action.outcome == NotificationOutcome.NOTIFIED
+
+
 def test_execute_without_runtime_uses_plain_send(
     notification: GitHubNotification,
     spool: SpoolManager,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mock_send = MagicMock()
-    monkeypatch.setattr("signalsmith.actions.send_notification", mock_send)
+    monkeypatch.setattr("signalsmith.actions.notify.send_notification", mock_send)
 
     action = make_action(notification, spool, notify_runtime=None)
     action.execute(dry_run=False)
@@ -154,7 +162,7 @@ def test_execute_dry_run_never_sends(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mock_send = MagicMock()
-    monkeypatch.setattr("signalsmith.actions.send_notification", mock_send)
+    monkeypatch.setattr("signalsmith.actions.notify.send_notification", mock_send)
     dispatcher = MagicMock()
     runtime = NotifyRuntime(
         dispatcher=dispatcher,

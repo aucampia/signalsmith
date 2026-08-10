@@ -17,23 +17,13 @@ from pathlib import Path
 
 from ..github.models import GitHubNotification
 from .models import IGNORED_ENTRY_ADAPTER, IgnoredEntry
-from .spool import resolve_state_dir
+from .spool import SpoolManager
 
 logger = logging.getLogger(__name__)
 
 __all__: list[str] = []
 
 _SANITIZE_RE = re.compile(r"[^A-Za-z0-9._-]")
-
-
-def resolve_ignore_dir() -> Path:
-    """Resolve the permanent-ignore directory.
-
-    Lives under the same state root as the spool, so it shares
-    `STATE_VERSION`'s marker - no separate version kind needed for a new
-    subdirectory under an already-versioned root.
-    """
-    return resolve_state_dir() / "ignored"
 
 
 def _sanitize(value: str) -> str:
@@ -52,6 +42,16 @@ class IgnoreStore:
         self._ignore_dir.mkdir(parents=True, exist_ok=True)
         self._index: dict[str, _Loaded] = {}
         self._load_all()
+
+    @staticmethod
+    def resolve_dir() -> Path:
+        """Resolve the permanent-ignore directory.
+
+        Lives under the same state root as the spool, so it shares
+        `STATE_VERSION`'s marker - no separate version kind needed for a new
+        subdirectory under an already-versioned root.
+        """
+        return SpoolManager.resolve_state_dir() / "ignored"
 
     def _load_all(self) -> None:
         for path in sorted(self._ignore_dir.glob("*.json")):
