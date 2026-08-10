@@ -13,12 +13,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import yaml
 from pydantic import TypeAdapter
 from pydantic.dataclasses import dataclass as pydantic_dataclass
 
+from ..actions.factory import resolve_action_config
 from ..cel_rules import RuleMatcher
 from ..github.models import (
     GITHUB_NOTIFICATION_ADAPTER,
@@ -27,7 +28,7 @@ from ..github.models import (
     GitHubPullRequest,
 )
 from ..versioning import TEST_VERSION, SchemaVersion, check_file_version
-from .models import Config, DefaultAction, RuleAction
+from .models import ActionKind, Config, DefaultAction
 
 __all__ = [
     "CaseResult",
@@ -39,7 +40,6 @@ __all__ = [
     "build_notification",
     "build_subject",
     "deep_merge",
-    "effective_action_kind",
     "resolve_config_templates",
     "resolve_parameters",
     "run_case",
@@ -100,7 +100,7 @@ class TemplateResolutionError(ValueError):
 @pydantic_dataclass(kw_only=True)
 class ExpectedResult:
     rule: str | None
-    action: Literal["notify", "mark_as_read", "ignore"] | None = None
+    action: ActionKind | None = None
 
 
 EXPECTED_RESULT_ADAPTER: TypeAdapter[ExpectedResult] = TypeAdapter(ExpectedResult)
@@ -270,27 +270,6 @@ def build_subject(
     return GitHubIssue.model_validate(deep_merge(_ISSUE_DEFAULTS, partial))
 
 
-def effective_action_kind(action: RuleAction, config: Config) -> str:
-    """Resolve a rule's action (inline or `ref`) to notify/mark_as_read/ignore."""
-    if action.ref:
-        action_def = config.actions[action.ref]
-        notify_config = action_def.notify
-        mark_as_read_config = action_def.mark_as_read
-        ignore_config = action_def.ignore
-    else:
-        notify_config = action.notify
-        mark_as_read_config = action.mark_as_read
-        ignore_config = action.ignore
-
-    if notify_config is not None:
-        return "notify"
-    if mark_as_read_config is not None:
-        return "mark_as_read"
-    if ignore_config is not None:
-        return "ignore"
-    raise ValueError("Rule action has no recognized action kind")  # pragma: no cover
-
-
 # ---------------------------------------------------------------------------
 # Case/file execution
 # ---------------------------------------------------------------------------
@@ -357,17 +336,20 @@ def run_case(
 
             actual_rule = matched.id if matched else None
             if matched is not None:
-                actual_action = effective_action_kind(matched.action, config)
-            else:
-                actual_action = (
-                    "notify"
-                    if config.default_action == DefaultAction.NOTIFY
-                    else "ignore"
+                actual_kind, _ = resolve_action_config(
+                    matched.action, config, rule_id=matched.id
                 )
+            else:
+                actual_kind = (
+                    ActionKind.NOTIFY
+                    if config.default_action == DefaultAction.NOTIFY
+                    else ActionKind.IGNORE
+                )
+            actual_action = actual_kind.value
 
             passed = actual_rule == expected.rule
             if passed and expected.action is not None:
-                passed = actual_action == expected.action
+                passed = actual_kind == expected.action
 
             results.append(
                 CaseResult(
@@ -377,7 +359,9 @@ def run_case(
                     passed=passed,
                     expected_rule=expected.rule,
                     actual_rule=actual_rule,
-                    expected_action=expected.action,
+                    expected_action=expected.action.value
+                    if expected.action is not None
+                    else None,
                     actual_action=actual_action,
                 )
             )
@@ -390,7 +374,9 @@ def run_case(
                     passed=False,
                     expected_rule=expected.rule,
                     actual_rule=None,
-                    expected_action=expected.action,
+                    expected_action=expected.action.value
+                    if expected.action is not None
+                    else None,
                     actual_action=None,
                     error=str(exc),
                 )

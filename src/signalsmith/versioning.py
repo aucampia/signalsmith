@@ -23,6 +23,8 @@ from typing import Any
 from pydantic import ConfigDict, Field, TypeAdapter, model_serializer, model_validator
 from pydantic.dataclasses import dataclass
 
+from .errors import SignalsmithError
+
 logger = logging.getLogger(__name__)
 
 __all__: list[str] = []
@@ -85,7 +87,7 @@ CACHE_VERSION = SchemaVersion(major=2, minor=0)
 MISSING_VERSION = SchemaVersion(major=0, minor=0)
 
 
-class VersionError(Exception):
+class VersionError(SignalsmithError):
     """An on-disk/config schema version is incompatible with this signalsmith version."""
 
     def __init__(

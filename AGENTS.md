@@ -44,7 +44,8 @@ don't care about, and alerts only on what matters.
 - `task validate:static` — Type checking, linting (mypy, ruff, codespell,
   yamlfmt, shfmt, shellcheck)
 - `task test` — Run pytest with coverage
-- `task validate` — Full validation pipeline (fix + static + test)
+- `task validate` — static checks + test (does *not* run `validate:fix`; use
+  `task fix-and-validate` for fix + static + test)
 
 ## Best Practices and Communication
 

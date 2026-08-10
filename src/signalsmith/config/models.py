@@ -24,6 +24,35 @@ class DefaultAction(StrEnum):
     IGNORE = "ignore"
 
 
+class ActionKind(StrEnum):
+    """Configurable action kinds - the values users write in YAML.
+
+    Every member's value must match a field name shared by `ActionDefinition`
+    and `RuleAction` below - `validate_exactly_one` on both, and
+    `actions.registry.ACTION_SPECS`, iterate this enum rather than hardcoding
+    the three kinds by name. Deliberately excludes `SkipAction`
+    (`actions/skip.py`): skipping is what a `notify` action degrades to when
+    the renotify interval hasn't elapsed, never something a user configures
+    directly.
+    """
+
+    NOTIFY = "notify"
+    MARK_AS_READ = "mark_as_read"
+    IGNORE = "ignore"
+
+
+def _oxford_join(items: list[str]) -> str:
+    if len(items) <= 2:
+        return " or ".join(items)
+    return ", ".join(items[:-1]) + f", or {items[-1]}"
+
+
+_ACTION_KIND_VALUES = [kind.value for kind in ActionKind]
+_ACTION_KIND_LIST = _oxford_join([f"'{v}'" for v in _ACTION_KIND_VALUES])
+_ACTION_KIND_SLASH_LIST = "/".join(_ACTION_KIND_VALUES)
+_ACTION_KIND_QUOTED_SLASH_LIST = "/".join(f"'{v}'" for v in _ACTION_KIND_VALUES)
+
+
 @dataclass(kw_only=True)
 class NotifyActionConfig:
     title: str
@@ -50,17 +79,9 @@ class ActionDefinition:
 
     @model_validator(mode="after")
     def validate_exactly_one(self) -> Self:
-        n = sum(
-            [
-                self.notify is not None,
-                self.mark_as_read is not None,
-                self.ignore is not None,
-            ]
-        )
+        n = sum(getattr(self, kind.value) is not None for kind in ActionKind)
         if n != 1:
-            raise ValueError(
-                "Exactly one of 'notify', 'mark_as_read', or 'ignore' must be set"
-            )
+            raise ValueError(f"Exactly one of {_ACTION_KIND_LIST} must be set")
         return self
 
 
@@ -76,20 +97,14 @@ class RuleAction:
     @model_validator(mode="after")
     def validate_exactly_one(self) -> Self:
         has_ref = self.ref is not None
-        has_inline = sum(
-            [
-                self.notify is not None,
-                self.mark_as_read is not None,
-                self.ignore is not None,
-            ]
-        )
+        has_inline = sum(getattr(self, kind.value) is not None for kind in ActionKind)
         if has_ref and has_inline > 0:
             raise ValueError(
-                "Cannot specify both 'ref' and inline action (notify/mark_as_read/ignore)"
+                f"Cannot specify both 'ref' and inline action ({_ACTION_KIND_SLASH_LIST})"
             )
         if not has_ref and has_inline != 1:
             raise ValueError(
-                "Must specify either 'ref' or exactly one of 'notify'/'mark_as_read'/'ignore'"
+                f"Must specify either 'ref' or exactly one of {_ACTION_KIND_QUOTED_SLASH_LIST}"
             )
         return self
 

@@ -5,37 +5,69 @@
 ```
 signalsmith/
 ├── src/signalsmith/                 # Python source code
-│   ├── cli.py                  # CLI entry point (Typer)
-│   ├── processor.py            # Notification processing orchestrator
-│   ├── actions.py              # Action implementations
-│   ├── notifier.py             # Desktop notification sender
-│   ├── cel_rules.py            # CEL expression filtering
-│   ├── protocols.py            # Provider protocol (NotificationProvider)
-│   ├── versioning.py           # Schema versioning for config/test/state/cache
-│   ├── github/                 # GitHub API concerns
-│   │   ├── client.py           # GitHub API client with caching
-│   │   └── models.py           # GitHub API + cache models
-│   ├── config/                 # User-facing YAML config schema
-│   │   ├── models.py           # Config, Rule, actions, masks, etc.
-│   │   └── testing.py          # Offline test harness for user config rules (`signalsmith test`)
-│   ├── state/                  # Durable on-disk state
-│   │   ├── models.py           # SpoolEntry, SpoolNotifyEvent
-│   │   └── spool.py            # Notified-notification spool (also drives renotify suppression)
-│   ├── notification/           # Cross-cutting notification vocabulary
-│   │   └── models.py           # NotificationOutcome
-│   ├── example-config.yaml              # Full config example
-│   ├── example-config-with-actions.yaml # Reusable actions example
-│   └── config-example-orgs.yaml         # Organization filtering example
+│   ├── cli.py                   # CLI entry point (Typer): flags -> app/ -> render
+│   ├── app/                     # Orchestration shared by the CLI commands
+│   │   ├── context.py           # AppContext, build_app_context, open_notify_runtime
+│   │   ├── cycle.py             # process_cycle: one create+execute+reap pass
+│   │   ├── daemon.py            # run_daemon: the `daemon` command's poll loop
+│   │   └── auth.py              # GitHub token resolution
+│   ├── processor.py             # Fetch -> mask -> rule-match -> action pipeline
+│   ├── actions/                 # Action implementations
+│   │   ├── base.py              # Action protocol
+│   │   ├── registry.py          # ACTION_SPECS: the ActionKind -> builder table
+│   │   ├── factory.py           # resolve_action_config, create_action_for_rule
+│   │   ├── execute.py           # execute_actions
+│   │   ├── runtime.py           # NotifyRuntime (daemon's interactive-notification context)
+│   │   └── notify.py / mark_as_read.py / ignore.py / skip.py  # one action kind each
+│   ├── stats.py                 # RunStats
+│   ├── errors.py                # SignalsmithError, AuthError (VersionError also derives from this)
+│   ├── cache.py                 # Cache directory (disposable: notification/subject cache, spool trash)
+│   ├── logging_config.py        # setup_logging, celpy noise filter, debug dump
+│   ├── notifier.py              # Desktop notification sender (`run`, non-interactive)
+│   ├── notify_dispatcher.py     # Persistent interactive notifier (`daemon`)
+│   ├── cel_rules.py             # CEL expression filtering
+│   ├── protocols.py             # Provider protocol (NotificationProvider)
+│   ├── versioning.py            # Schema versioning for config/test/state/cache
+│   ├── github/                  # GitHub API concerns
+│   │   ├── client.py             # GitHub API client with caching
+│   │   └── models.py             # GitHub API + cache models
+│   ├── config/                  # User-facing YAML config schema
+│   │   ├── models.py             # Config, Rule, ActionKind, actions, masks, etc.
+│   │   └── testing.py            # Offline test harness for user config rules (`signalsmith test`)
+│   ├── state/                    # Durable on-disk state
+│   │   ├── models.py             # SpoolEntry, SpoolNotifyEvent, IgnoredEntry
+│   │   ├── spool.py              # Notified-notification spool (also drives renotify suppression)
+│   │   └── ignore_store.py       # Permanent-ignore store (the notification "Ignore" button)
+│   ├── notification/             # Cross-cutting notification vocabulary
+│   │   └── models.py             # NotificationOutcome
+│   └── examples/                 # Example config YAMLs (see README.md)
+│       ├── example-config.yaml
+│       ├── example-config-with-actions.yaml
+│       └── config-example-orgs.yaml
 ├── tests/                # pytest test suite, mirroring src/signalsmith/ packages
+│   ├── app/
+│   │   ├── test_context.py
+│   │   ├── test_cycle.py
+│   │   ├── test_daemon.py
+│   │   └── test_auth.py
+│   ├── actions/
+│   │   ├── test_registry.py
+│   │   ├── test_notify.py
+│   │   ├── test_skip.py
+│   │   └── test_execute.py
 │   ├── github/
 │   │   └── test_client.py
 │   ├── config/
 │   │   ├── test_models.py
 │   │   └── test_testing.py
 │   ├── state/
-│   │   └── test_spool.py
+│   │   ├── test_spool.py
+│   │   └── test_ignore_store.py
+│   ├── conftest.py       # Shared fixtures (MockProvider, minimal Config, ...)
+│   ├── test_cli.py
 │   ├── test_cel_rules.py
 │   ├── test_notifier.py
+│   ├── test_notify_dispatcher.py
 │   ├── test_processor.py
 │   ├── test_example_configs.py
 │   └── test_versioning.py
@@ -99,11 +131,13 @@ Run these commands in order:
    ```
    This runs pytest with coverage reporting.
 
-4. **Full validation (all of the above):**
+4. **Full validation (static checks + tests):**
    ```bash
    task validate
    ```
-   Runs `validate:fix`, `validate:static`, and `test` in sequence.
+   Runs `validate:static` then `test` - it does *not* run `validate:fix`.
+   Use `task fix-and-validate` to run all three (`validate:fix`,
+   `validate:static`, `test`) in sequence.
 
 ### Running the CLI Locally
 
@@ -135,7 +169,7 @@ uv run signalsmith daemon --poll-interval 300
 
 ## Configuration Files
 
-Example config files live in `src/signalsmith/`:
+Example config files live in `src/signalsmith/examples/`:
 - `example-config.yaml` - Comprehensive feature showcase
 - `example-config-with-actions.yaml` - Reusable action definitions
 - `config-example-orgs.yaml` - Organization filtering patterns

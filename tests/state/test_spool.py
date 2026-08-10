@@ -11,7 +11,7 @@ from signalsmith.github.models import (
     GitHubSubject,
     GitHubUser,
 )
-from signalsmith.state.spool import SpoolManager, ensure_state_version
+from signalsmith.state.spool import SpoolManager
 from signalsmith.versioning import (
     SchemaVersion,
     VersionError,
@@ -411,7 +411,7 @@ def test_corrupt_spool_file_is_skipped_and_left_in_place(tmp_path: Path) -> None
 
 def test_ensure_state_version_fresh_dir_writes_marker(tmp_path: Path) -> None:
     state_dir = tmp_path / "state"
-    ensure_state_version(state_dir)
+    SpoolManager.ensure_state_version(state_dir)
     assert read_marker(state_dir) == SchemaVersion(major=1, minor=0)
 
 
@@ -423,7 +423,7 @@ def test_ensure_state_version_populated_dir_without_marker_raises(
     spool_dir.mkdir(parents=True)
     (spool_dir / "github-1.json").write_text("{}")
     with pytest.raises(VersionError) as exc_info:
-        ensure_state_version(state_dir)
+        SpoolManager.ensure_state_version(state_dir)
     assert "signalsmith state clean" in str(exc_info.value)
 
 
@@ -444,5 +444,5 @@ def test_ensure_state_version_compatible_marker_passes(
     (spool_dir / "github-1.json").write_text("{}")
     write_marker(state_dir, SchemaVersion(major=1, minor=marker_minor))
     with caplog.at_level(logging.WARNING):
-        ensure_state_version(state_dir)
+        SpoolManager.ensure_state_version(state_dir)
     assert any("newer" in record.message for record in caplog.records) == expect_warning

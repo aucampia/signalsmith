@@ -140,7 +140,7 @@ asyncio_mode = "auto"
 [tool.mypy]
 # https://mypy.readthedocs.io/en/stable/config_file.html
 files = "src,tests"
-mypy_path = "src"
+mypy_path = "src:tests"
 python_version = "3.14"
 strict = true
 warn_unreachable = true

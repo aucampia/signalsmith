@@ -7,7 +7,7 @@ from signalsmith.github.models import (
     GitHubRepository,
     GitHubSubject,
 )
-from signalsmith.state.ignore_store import IgnoreStore, resolve_ignore_dir
+from signalsmith.state.ignore_store import IgnoreStore
 
 
 @pytest.fixture
@@ -127,6 +127,6 @@ def test_corrupt_ignore_file_is_skipped_and_left_in_place(tmp_path: Path) -> Non
 
 
 def test_resolve_ignore_dir_is_under_state_dir() -> None:
-    from signalsmith.state.spool import resolve_state_dir
+    from signalsmith.state.spool import SpoolManager
 
-    assert resolve_ignore_dir() == resolve_state_dir() / "ignored"
+    assert IgnoreStore.resolve_dir() == SpoolManager.resolve_state_dir() / "ignored"
