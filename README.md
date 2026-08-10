@@ -15,8 +15,10 @@ GitHub notifications manager with desktop alerts and CEL-based filtering.
 
 ## Installation
 
+Not yet published to PyPI - install straight from GitHub:
+
 ```bash
-uv tool install signalsmith
+uv tool install git+https://github.com/aucampia/signalsmith
 ```
 
 For development installation, see [CONTRIBUTING.md](./CONTRIBUTING.md).
