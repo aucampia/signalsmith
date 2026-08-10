@@ -41,6 +41,18 @@ class ActionKind(StrEnum):
     IGNORE = "ignore"
 
 
+def _oxford_join(items: list[str]) -> str:
+    if len(items) <= 2:
+        return " or ".join(items)
+    return ", ".join(items[:-1]) + f", or {items[-1]}"
+
+
+_ACTION_KIND_VALUES = [kind.value for kind in ActionKind]
+_ACTION_KIND_LIST = _oxford_join([f"'{v}'" for v in _ACTION_KIND_VALUES])
+_ACTION_KIND_SLASH_LIST = "/".join(_ACTION_KIND_VALUES)
+_ACTION_KIND_QUOTED_SLASH_LIST = "/".join(f"'{v}'" for v in _ACTION_KIND_VALUES)
+
+
 @dataclass(kw_only=True)
 class NotifyActionConfig:
     title: str
@@ -69,9 +81,7 @@ class ActionDefinition:
     def validate_exactly_one(self) -> Self:
         n = sum(getattr(self, kind.value) is not None for kind in ActionKind)
         if n != 1:
-            raise ValueError(
-                "Exactly one of 'notify', 'mark_as_read', or 'ignore' must be set"
-            )
+            raise ValueError(f"Exactly one of {_ACTION_KIND_LIST} must be set")
         return self
 
 
@@ -90,11 +100,11 @@ class RuleAction:
         has_inline = sum(getattr(self, kind.value) is not None for kind in ActionKind)
         if has_ref and has_inline > 0:
             raise ValueError(
-                "Cannot specify both 'ref' and inline action (notify/mark_as_read/ignore)"
+                f"Cannot specify both 'ref' and inline action ({_ACTION_KIND_SLASH_LIST})"
             )
         if not has_ref and has_inline != 1:
             raise ValueError(
-                "Must specify either 'ref' or exactly one of 'notify'/'mark_as_read'/'ignore'"
+                f"Must specify either 'ref' or exactly one of {_ACTION_KIND_QUOTED_SLASH_LIST}"
             )
         return self
 

@@ -42,8 +42,9 @@ def run_daemon(
             and ctx.provider.poll_interval > interval
         ):
             logger.info(
-                "GitHub requested a minimum poll interval of %d seconds "
+                "%s requested a minimum poll interval of %d seconds "
                 "(configured interval is %d); honoring the larger value",
+                ctx.provider.name,
                 ctx.provider.poll_interval,
                 interval,
             )
