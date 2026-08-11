@@ -13,7 +13,7 @@ def _minimal_config(**overrides: object) -> Config:
 
 def _patch_construction(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, config: Config
-) -> tuple[MagicMock, MagicMock, MagicMock, MagicMock]:
+) -> tuple[MagicMock, MagicMock, MagicMock, MagicMock, MagicMock]:
     monkeypatch.setattr(
         "signalsmith.app.context.Config", MagicMock(load=MagicMock(return_value=config))
     )
@@ -29,19 +29,30 @@ def _patch_construction(
     spool_manager_cls.resolve_trash_dir.return_value = tmp_path / "trash"
     monkeypatch.setattr("signalsmith.app.context.SpoolManager", spool_manager_cls)
 
+    history_instance = MagicMock()
+    history_store_cls = MagicMock(return_value=history_instance)
+    history_store_cls.resolve_dir.return_value = tmp_path / "history"
+    monkeypatch.setattr("signalsmith.app.context.HistoryStore", history_store_cls)
+
     ignore_instance = MagicMock()
     ignore_store_cls = MagicMock(return_value=ignore_instance)
     ignore_store_cls.resolve_dir.return_value = tmp_path / "ignored"
     monkeypatch.setattr("signalsmith.app.context.IgnoreStore", ignore_store_cls)
 
-    return github_client_cls, spool_manager_cls, ignore_store_cls, provider
+    return (
+        github_client_cls,
+        spool_manager_cls,
+        history_store_cls,
+        ignore_store_cls,
+        provider,
+    )
 
 
 def test_build_app_context_wires_config_provider_spool_ignore_store(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = _minimal_config()
-    _, spool_manager_cls, _, provider = _patch_construction(
+    _, spool_manager_cls, _, _, provider = _patch_construction(
         monkeypatch, tmp_path, config
     )
 
@@ -58,7 +69,7 @@ def test_build_app_context_passes_cache_only_to_provider(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = _minimal_config()
-    github_client_cls, _, _, _ = _patch_construction(monkeypatch, tmp_path, config)
+    github_client_cls, _, _, _, _ = _patch_construction(monkeypatch, tmp_path, config)
 
     build_app_context(cache_only=True)
 
@@ -70,7 +81,7 @@ def test_build_app_context_skips_state_version_check_when_disabled(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = _minimal_config()
-    _, spool_manager_cls, _, _ = _patch_construction(monkeypatch, tmp_path, config)
+    _, spool_manager_cls, _, _, _ = _patch_construction(monkeypatch, tmp_path, config)
 
     build_app_context(check_state_version=False)
 

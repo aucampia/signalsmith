@@ -12,6 +12,7 @@ from signalsmith.github.models import (
     GitHubRepository,
     GitHubSubject,
 )
+from signalsmith.state.history import HistoryStore
 from signalsmith.state.ignore_store import IgnoreStore
 from signalsmith.state.spool import SpoolManager
 
@@ -33,9 +34,14 @@ def _make_ctx(tmp_path: Path, notifications: list[GitHubNotification]) -> AppCon
     config = Config(default_action=DefaultAction.IGNORE, rules=[])
     provider = MockProvider(notifications)
     spool = SpoolManager(tmp_path / "spool", tmp_path / "trash")
+    history_store = HistoryStore(tmp_path / "history")
     ignore_store = IgnoreStore(tmp_path / "ignored")
     return AppContext(
-        config=config, provider=provider, spool=spool, ignore_store=ignore_store
+        config=config,
+        provider=provider,
+        spool=spool,
+        history_store=history_store,
+        ignore_store=ignore_store,
     )
 
 

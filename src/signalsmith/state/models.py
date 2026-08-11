@@ -6,6 +6,7 @@ from pydantic import TypeAdapter
 from pydantic.dataclasses import dataclass
 
 from ..github.models import GitHubNotification
+from ..notification.models import NotificationOutcome
 
 __all__: list[str] = []
 
@@ -77,3 +78,32 @@ class IgnoredEntry:
 
 
 IGNORED_ENTRY_ADAPTER: TypeAdapter[IgnoredEntry] = TypeAdapter(IgnoredEntry)
+
+
+@dataclass(kw_only=True)
+class HistoryEntry:
+    """Durable on-disk record of a notification and its outcome.
+
+    Written for every notification that passes through the pipeline (every
+    outcome: notified, ignored, skipped, filtered, etc.), not just the ones
+    that trigger a desktop alert. `notification` is always present (it is
+    the raw response from the API list call). `rendered_title`/`rendered_body`
+    and `subject`/`subject_type` are populated for `NOTIFIED` outcomes (where a
+    desktop notification was generated and the Issue/PR may have been fetched
+    for template rendering), and are carried forward from a previous entry when
+    a later cycle overwrites the same notification with a non-notified outcome.
+    """
+
+    provider: str
+    notification_id: str
+    recorded_at: datetime
+    outcome: NotificationOutcome
+    rule_id: str
+    notification: GitHubNotification
+    rendered_title: str | None = None
+    rendered_body: str | None = None
+    subject: dict[str, Any] | None = None
+    subject_type: str | None = None
+
+
+HISTORY_ENTRY_ADAPTER: TypeAdapter[HistoryEntry] = TypeAdapter(HistoryEntry)

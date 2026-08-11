@@ -3,8 +3,9 @@
 import logging
 from typing import Any
 
-from ..actions import execute_actions
+from ..actions.notify import NotifyAction
 from ..github.models import GitHubNotification
+from ..notification.models import NotificationOutcome
 from ..processor import create_actions
 from ..stats import RunStats
 from .context import AppContext
@@ -51,7 +52,48 @@ def process_cycle(
         ignore_store=ctx.ignore_store,
         notify_runtime=ctx.notify_runtime,
     )
-    execute_actions(actions, dry_run=dry_run, stats=stats)
+    action_count = 0
+    for notification, (outcome, action) in zip(notifications, actions, strict=True):
+        if stats is not None:
+            stats.outcomes[outcome] += 1
+        if action is not None:
+            action_count += 1
+            logger.debug(
+                "Executing action %d: %s (dry_run=%s)",
+                action_count,
+                action.__class__.__name__,
+                dry_run,
+            )
+            action.execute(dry_run=dry_run)
+        if not dry_run:
+            rendered_title: str | None = None
+            rendered_body: str | None = None
+            subject = None
+            subject_type: str | None = None
+            if isinstance(action, NotifyAction):
+                rendered_title = action.rendered.title
+                rendered_body = action.rendered.body
+                if action.subject is not None:
+                    subject = action.subject
+                    subject_type = action.notification.subject.type
+            history_outcome = (
+                NotificationOutcome.NOTIFIED
+                if outcome == NotificationOutcome.SKIPPED
+                else outcome
+            )
+            ctx.history_store.record(
+                provider=ctx.provider.name,
+                notification=notification,
+                outcome=history_outcome,
+                rule_id=getattr(action, "rule_id", ""),
+                rendered_title=rendered_title,
+                rendered_body=rendered_body,
+                subject=subject,
+                subject_type=subject_type,
+            )
+
+    logger.info("Executed %d actions total", action_count)
+
     if not dry_run and limit is None:
         removed = ctx.spool.reap(ctx.provider.name, {n.id for n in notifications})
         logger.info("Reaped %d spool entries no longer in the unread feed", removed)
