@@ -298,7 +298,7 @@ def run_case(
     merged_input = deep_merge(file_input, case.input)
 
     # Compute account once (doesn't depend on parameter)
-    account = deep_merge(DEFAULT_ACCOUNT, merged_input.get("account") or {})
+    account = deep_merge(DEFAULT_ACCOUNT, merged_input.get("account", {}))
 
     # Resolve effective variables: case > file > config (replace, never merge).
     # `variables:` blocks may reference `config.variables` and `account`, but NOT
@@ -306,6 +306,10 @@ def run_case(
     config_scope = {"variables": config.variables}
     raw_variables = case.variables if case.variables is not None else file_variables
     try:
+        if not isinstance(account, dict):
+            raise TemplateResolutionError(
+                f"input.account must be a mapping, got {type(account).__name__}"
+            )
         if raw_variables is None:
             effective_variables = config.variables
         else:
@@ -374,11 +378,21 @@ def run_case(
 
         try:
             notification_partial = resolve_config_templates(
-                merged_input.get("notification") or {}, scope
+                merged_input.get("notification", {}), scope
             )
+            if not isinstance(notification_partial, dict):
+                raise TemplateResolutionError(
+                    "input.notification must be a mapping, "
+                    f"got {type(notification_partial).__name__}"
+                )
             subject_partial = resolve_config_templates(
-                merged_input.get("subject") or {}, scope
+                merged_input.get("subject", {}), scope
             )
+            if not isinstance(subject_partial, dict):
+                raise TemplateResolutionError(
+                    "input.subject must be a mapping, "
+                    f"got {type(subject_partial).__name__}"
+                )
             notification = build_notification(notification_partial)
             subject = build_subject(subject_partial, notification.subject.type)
 

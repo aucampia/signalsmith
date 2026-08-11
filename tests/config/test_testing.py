@@ -673,6 +673,111 @@ def test_run_case_parameters_resolves_against_overridden_variables() -> None:
     assert results[0].parameter == "override-bot"
 
 
+@pytest.mark.parametrize(
+    ("input_override", "expect_msg"),
+    [
+        ({"notification": []}, "input.notification must be a mapping"),
+        ({"notification": None}, "input.notification must be a mapping"),
+        ({"notification": "not-a-dict"}, "input.notification must be a mapping"),
+        ({"notification": 0}, "input.notification must be a mapping"),
+        ({"subject": []}, "input.subject must be a mapping"),
+        ({"subject": None}, "input.subject must be a mapping"),
+        ({"subject": "not-a-dict"}, "input.subject must be a mapping"),
+    ],
+    ids=[
+        "notification-list",
+        "notification-null",
+        "notification-string",
+        "notification-int",
+        "subject-list",
+        "subject-null",
+        "subject-string",
+    ],
+)
+def test_run_case_non_dict_notification_or_subject_reports_error(
+    input_override: dict[str, Any], expect_msg: str
+) -> None:
+    config = _bot_pr_config()
+    case = RuleTestCase(
+        name="bad input",
+        input=input_override,
+        expect={"rule": None},
+    )
+    results = run_case(config, case, {}, "test.yaml")
+    assert not results[0].passed
+    assert results[0].error is not None
+    assert expect_msg in results[0].error
+
+
+def test_run_case_whole_value_template_resolves_notification_to_dict() -> None:
+    config = Config(
+        variables={
+            "notification_dict": {
+                "subject": {"type": "PullRequest"},
+                "reason": "subscribed",
+            }
+        },
+        rules=[
+            Rule(
+                id="catch_all",
+                expression="true",
+                action=RuleAction(ignore=IgnoreActionConfig()),
+            )
+        ],
+        default_action=DefaultAction.NOTIFY,
+    )
+    case = RuleTestCase(
+        name="template to dict",
+        input={
+            "notification": "{{ variables.notification_dict }}",
+        },
+        expect={"rule": "catch_all"},
+    )
+    results = run_case(config, case, {}, "test.yaml")
+    assert results[0].passed
+    assert results[0].actual_rule == "catch_all"
+
+
+def test_run_case_template_resolving_notification_to_non_dict_reports_error() -> None:
+    config = Config(
+        variables={"not_a_dict": ["a", "b"]},
+        rules=[
+            Rule(
+                id="catch_all",
+                expression="true",
+                action=RuleAction(ignore=IgnoreActionConfig()),
+            )
+        ],
+    )
+    case = RuleTestCase(
+        name="template resolves to list",
+        input={
+            "notification": "{{ variables.not_a_dict }}",
+        },
+        expect={"rule": None},
+    )
+    results = run_case(config, case, {}, "test.yaml")
+    assert not results[0].passed
+    assert results[0].error is not None
+    assert "input.notification must be a mapping" in results[0].error
+
+
+def test_run_case_non_dict_account_reports_error() -> None:
+    config = _bot_pr_config()
+    case = RuleTestCase(
+        name="bad account",
+        input={
+            "account": "not-a-dict",
+            "notification": {"subject": {"type": "Issue"}},
+        },
+        expect={"rule": None},
+    )
+    results = run_case(config, case, {}, "test.yaml")
+    assert not results[0].passed
+    assert results[0].error is not None
+    assert "input.account must be a mapping" in results[0].error
+
+
 def test_run_test_file_with_version_2_1(tmp_path: Path) -> None:
     """run_test_file round-trip with version: '2.1' and variables:."""
     config = _config_with_variables({"spam_bots": ["bot"]})
