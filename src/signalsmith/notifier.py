@@ -1,4 +1,5 @@
 import logging
+from functools import cache
 
 from desktop_notifier.sync import DesktopNotifierSync
 from pydantic.dataclasses import dataclass
@@ -17,6 +18,11 @@ class RenderedNotification:
     url: str | None = None
 
 
+@cache
+def _get_notifier() -> DesktopNotifierSync:
+    return DesktopNotifierSync(app_name="signalsmith")
+
+
 def send_notification(rendered: RenderedNotification) -> None:
     """Fire-and-forget a plain notification: no click/dismiss/button support.
 
@@ -29,8 +35,6 @@ def send_notification(rendered: RenderedNotification) -> None:
         "Sending notification: title=%r body=%r", rendered.title, rendered.body
     )
     try:
-        DesktopNotifierSync(app_name="signalsmith").send(
-            title=rendered.title, message=rendered.body
-        )
+        _get_notifier().send(title=rendered.title, message=rendered.body)
     except Exception:
         logger.exception("Failed to send desktop notification")
