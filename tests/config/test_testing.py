@@ -483,10 +483,11 @@ def test_expected_result_rule_null_is_valid() -> None:
 def test_run_case_file_variables_replaces_config() -> None:
     """File-level variables replace config; config keys don't leak through."""
     config = _config_with_variables(
-        {"config_key": "config_value", "spam_bots": ["bot"]}
+        {"config_key": "config_value", "spam_bots": ["config-bot"]}
     )
     case = RuleTestCase(
         name="test",
+        parameters="{{ variables.get('spam_bots', ['file-bot']) }}",
         input={},
         expect={"rule": "noop"},
     )
@@ -494,8 +495,10 @@ def test_run_case_file_variables_replaces_config() -> None:
         config, case, {}, "test.yaml", file_variables={"file_key": "file_value"}
     )
     assert len(results) == 1
-    # Would fail if config keys leaked: we'd get "spam_bots" from config
-    # Instead we only get what file_variables provided
+    # Config has spam_bots=["config-bot"], but file_variables doesn't include it,
+    # so the .get() fallback fires → parameter is "file-bot" (from ["file-bot"][0]),
+    # proving config didn't leak
+    assert results[0].parameter == "file-bot"
 
 
 def test_run_case_case_variables_replaces_file() -> None:
@@ -503,15 +506,23 @@ def test_run_case_case_variables_replaces_file() -> None:
     config = _config_with_variables({"config_key": "config_value"})
     case = RuleTestCase(
         name="test",
+        parameters="{{ variables.get('shared_key', ['case-default']) }}",
         input={},
         expect={"rule": "noop"},
         variables={"case_key": "case_value"},
     )
     results = run_case(
-        config, case, {}, "test.yaml", file_variables={"file_key": "file_value"}
+        config,
+        case,
+        {},
+        "test.yaml",
+        file_variables={"file_key": "file_value", "shared_key": ["file-value"]},
     )
     assert len(results) == 1
-    # Case variables win; file_key from file_variables is not present
+    # File has shared_key=["file-value"], but case variables replace wholesale,
+    # so shared_key is absent → .get() fallback fires → parameter is "case-default"
+    # (from ["case-default"][0]), proving file variables didn't leak
+    assert results[0].parameter == "case-default"
 
 
 def test_run_case_empty_variables_dict_is_distinct_from_none() -> None:
@@ -614,8 +625,8 @@ def test_run_case_parameters_resolves_against_overridden_variables() -> None:
     )
     results = run_case(config, case, {}, "test.yaml")
     assert len(results) == 1
-    # parameter would be "override-bot" if variables override worked
-    assert results[0].passed
+    # Config has ["config-bot"], but case overrides to ["override-bot"]
+    assert results[0].parameter == "override-bot"
 
 
 def test_run_test_file_with_version_2_1(tmp_path: Path) -> None:

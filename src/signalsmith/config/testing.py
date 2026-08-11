@@ -292,7 +292,7 @@ def run_case(
     file_input: dict[str, Any],
     file_name: str,
     *,
-    file_variables: dict[str, Any] | None = None,
+    file_variables: Any = None,
 ) -> list[CaseResult]:
     results: list[CaseResult] = []
     merged_input = deep_merge(file_input, case.input)
