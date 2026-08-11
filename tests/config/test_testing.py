@@ -589,6 +589,52 @@ def test_run_case_variables_references_config_in_scope() -> None:
     assert effective["other"] == "value"
 
 
+def test_run_case_variables_can_reference_account() -> None:
+    """Variables templates can reference account (e.g. for user-specific overrides)."""
+    config = _config_with_variables({"default_user": "someone"})
+    case = RuleTestCase(
+        name="test",
+        input={"account": {"github": {"username": "testuser"}}},
+        parameters="{{ [variables.get('default_user')] }}",
+        expect={"rule": "noop"},
+    )
+    # Use a template string for variables that references account
+    # (must go through file to trigger template resolution)
+    results = run_case(
+        config,
+        case,
+        {},
+        "test.yaml",
+        file_variables="{{ dict(config.variables, default_user=account.github.username) }}",
+    )
+    assert len(results) == 1
+    assert results[0].parameter == "testuser"
+
+
+def test_run_test_file_with_file_level_empty_variables(tmp_path: Path) -> None:
+    """File-level variables: {} (empty dict) is distinct from absent field."""
+    config = _config_with_variables({"spam_bots": ["bot"]})
+    path = tmp_path / "test.yaml"
+    path.write_text(
+        """version: '2.1'
+variables: {}
+cases:
+  - name: empty variables from file
+    parameters: "{{ variables.get('spam_bots', ['fallback']) }}"
+    input:
+      notification:
+        subject:
+          type: Issue
+    expect:
+      rule: noop
+"""
+    )
+    results = run_test_file(config, path)
+    assert len(results) == 1
+    # File has variables: {}, so spam_bots is absent → .get() returns ['fallback']
+    assert results[0].parameter == "fallback"
+
+
 def test_run_case_variables_non_dict_raises(tmp_path: Path) -> None:
     """variables: resolving to non-dict raises TemplateResolutionError."""
     config = _config_with_variables({})

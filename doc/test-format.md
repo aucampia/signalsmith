@@ -60,10 +60,11 @@ cases:
 ## Test Case Structure
 
 - **`version`** (required, file-level) — the test file's schema version (`MAJOR.MINOR`, e.g. `'2.1'`). An incompatible version refuses to run the file; see [Versioning](./config.md#versioning) for the compatibility rules and bump policy.
-- **`variables`** (optional, file-level and/or case-level) — replaces the config's `variables:` block for this test. **Never merges**: the most specific `variables:` (case > file > config) wins wholesale. `variables: {}` means no variables at all. Enables testing rules against absent or modified variable blocks. Can contain `{{ ... }}` templates referencing `config.variables` (the real config's variables, for reconstruction) and `account`, but **not** `parameter` (would be circular, since `parameters:` can reference `variables`). Example reconstruction idioms:
+- **`variables`** (optional, file-level and/or case-level) — replaces the config's `variables:` block for this test. **Never merges**: the most specific `variables:` (case > file > config) wins wholesale. `variables: {}` means no variables at all. Enables testing rules against absent or modified variable blocks. Can contain `{{ ... }}` templates referencing `config.variables` (the real config's variables, for reconstruction) and `account`, but **not** `parameter` (parameters are expanded after variables are resolved, using the effective variables in scope). **Note**: case-level variables also cannot reference file-level variables (only `config.variables` is exposed, not `file.variables`) — a case must reconstruct from config if it wants to build on file-level overrides. Example reconstruction idioms:
   - `variables: "{{ config.variables }}"` — use the config verbatim
   - `variables: "{{ dict(config.variables, ontopic={}) }}"` — shallow override
   - `variables: "{{ dict(config.variables|items|rejectattr('0','eq','ontopic')|list) }}"` — all keys except one
+  - `variables: "{{ dict(default_user=account.github.username) }}"` — use account info
 - **`expect.rule`** — id of the rule expected to be the first match; `null` asserts that *no* rule matches (falling through to `default_action`).
 - **`expect.action`** (optional) — cross-checks the resulting `notify`/`mark_as_read`/`ignore` action, catching a case where the right *action* happens via the wrong rule.
 - Both `expect.rule` and `expect.action` support the same `{{ ... }}` templating as `input.notification`/`input.subject` (see the last example above) — useful when one parameterized case exercises more than one rule.
