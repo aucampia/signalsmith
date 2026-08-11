@@ -59,32 +59,24 @@ rules:
   # Team/CODEOWNERS-based review requests don't count - only direct.
   - id: reviewer_or_assignee
     expression: >
-      notification.subject.type in ["Issue", "PullRequest"] and (
-
-
-
+      notification.subject.type in ["Issue", "PullRequest"]
+      and (
         account.github.username in (
           (subject.assignees + subject.requested_reviewers|default([]))
           | map(attribute='login')
         )
       )
-
     action:
       notify: {}
   # On-topic repos are relevant - notify.
   - id: on_topic_notify
     expression: >
       (
-
-
-
         variables.get('ontopic', {}).get('prefixes', [])
         | select('startingwith', notification.repository.full_name)
         | first is defined
-      ) or (notification.repository.full_name
-
-
-
+      )
+      or (notification.repository.full_name
           in variables.get('ontopic', {}).get('repos', []))
     action:
       notify: {}
@@ -92,18 +84,16 @@ rules:
   # mark as read.
   - id: closed_pr_mark_as_read
     expression: >
-      notification.subject.type == "PullRequest" and (subject.merged or subject.state == "closed")
-
+      notification.subject.type == "PullRequest"
+      and (subject.merged or subject.state == "closed")
     action:
       mark_as_read: {}
   # PR review requests where *every* requested team is a known auto-approval
   # group are pure deploy-gate noise - mark as read.
   - id: spam_team_mark_as_read
     expression: >
-      notification.subject.type == "PullRequest" and (
-
-
-
+      notification.subject.type == "PullRequest"
+      and (
         subject.requested_teams and (
           subject.requested_teams
           | rejectattr('slug', 'in',
@@ -115,14 +105,13 @@ rules:
           | first is undefined
         )
       )
-
     action:
       mark_as_read: {}
   # Auto-generated PRs opened by known bot users - mark as read.
   - id: bot_pr_mark_as_read
     expression: >
-      notification.subject.type == "PullRequest" and (subject.user.login in variables.get('spam_bots', []))
-
+      notification.subject.type == "PullRequest"
+      and (subject.user.login in variables.get('spam_bots', []))
     action:
       mark_as_read: {}
   # Off-topic repos are noisy (team-based review requests etc). Anything not
@@ -131,16 +120,11 @@ rules:
   - id: off_topic_mark_as_read
     expression: >
       (
-
-
-
         variables.get('offtopic', {}).get('prefixes', [])
         | select('startingwith', notification.repository.full_name)
         | first is defined
-      ) or (notification.repository.full_name
-
-
-
+      )
+      or (notification.repository.full_name
           in variables.get('offtopic', {}).get('repos', []))
     action:
       mark_as_read: {}
