@@ -176,6 +176,22 @@ class TestEvaluate:
         with pytest.raises(jinja2.UndefinedError):
             evaluate("subject.merged", {"subject": {}})
 
+    def test_nested_attribute_default_does_not_guard_parent(self) -> None:
+        """|default([]) only guards the LAST hop. If the parent key is absent,
+        accessing a nested attribute raises before the default filter runs.
+        This is why variables.ontopic.prefixes|default([]) fails with an empty
+        variables dict - it needs .get() chaining instead."""
+        with pytest.raises(jinja2.UndefinedError, match="has no attribute 'ontopic'"):
+            evaluate("variables.ontopic.prefixes|default([])", {"variables": {}})
+
+    def test_get_chaining_guards_nested_access(self) -> None:
+        """variables.get('ontopic', {}).get('prefixes', []) safely handles
+        missing parent keys, returning the final default."""
+        result = evaluate(
+            "variables.get('ontopic', {}).get('prefixes', [])", {"variables": {}}
+        )
+        assert result == []
+
     def test_syntax_error_raises(self) -> None:
         with pytest.raises(jinja2.TemplateSyntaxError):
             evaluate("a == && b", {})
