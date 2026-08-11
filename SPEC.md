@@ -65,9 +65,9 @@ Three layers, each usable (and testable) independently of the one above it:
 - **Domain modules** — `processor` (fetch → org-mask → rule-match → action,
   see `rules.RuleMatcher`), `actions` (turns a matched rule into an
   executable `Action`, rendering its notice via `templating` along the way),
-  `templating` (the shared Jinja engine: rule `expression`/`subject_expression`
-  evaluation, and rendering of the top-level `notice:` block and a `notify`
-  action's `title`/`body` overrides), `state` (durable spool + permanent-ignore
+  `templating` (the shared Jinja engine: rule `expression` evaluation and
+  rendering of the top-level `notice:` block and a `notify` action's
+  `title`/`body` overrides), `state` (durable spool + permanent-ignore
   store), `github` (the current `NotificationProvider` implementation),
   `config` (the YAML schema and its offline test harness).
 
@@ -82,7 +82,7 @@ action-construction time inside `processor.create_actions` - not lazily in
 `Action.execute()`. This is what lets `--dry-run` show the actual rendered
 title/body rather than raw notification fields, and what lets a `notify`
 template fetch a subject on demand (via `templating.references_subject`) even
-when the matched rule's own `subject_expression` didn't need one.
+when the matched rule's expression didn't touch it.
 
 ### Extension point: adding an action kind
 

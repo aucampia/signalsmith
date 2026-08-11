@@ -257,8 +257,7 @@ def _bot_pr_config() -> Config:
         rules=[
             Rule(
                 id="bot_pr_mark_as_read",
-                expression='notification.subject.type == "PullRequest"',
-                subject_expression="subject.user.login in variables.spam_bots",
+                expression='notification.subject.type == "PullRequest" and (subject.user.login in variables.spam_bots)',
                 action=RuleAction(mark_as_read=MarkAsReadActionConfig()),
             ),
         ],
@@ -391,8 +390,7 @@ def test_run_case_uses_account_for_username_expressions() -> None:
         rules=[
             Rule(
                 id="reviewer_or_assignee",
-                expression='notification.subject.type == "PullRequest"',
-                subject_expression="account.github.username in subject.assignees|map(attribute='login')",
+                expression="notification.subject.type == \"PullRequest\" and (account.github.username in subject.assignees|map(attribute='login'))",
                 action=RuleAction(notify=NotifyActionConfig(title="t", body="m")),
             )
         ],

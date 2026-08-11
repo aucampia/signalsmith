@@ -64,7 +64,7 @@ asking for a longer wait, signalsmith sleeps for that instead.
 Create `~/.config/signalsmith/config.yaml` (or set `SIGNALSMITH_CONFIG` to a custom path):
 
 ```yaml
-version: '3.0'  # config file schema version (see doc/config.md#versioning)
+version: '4.0'  # config file schema version (see doc/config.md#versioning)
 
 poll_interval: 300  # seconds
 
@@ -85,9 +85,8 @@ rules:
   - id: important-mentions
     expression: |
       notification.reason == "mention" and
-      notification.subject.type == "PullRequest"
-    subject_expression: |
-      not subject.draft
+      notification.subject.type == "PullRequest" and
+      (not subject.draft)
     action:
       notify:
         title: "PR Mention: {{ notification.subject.title }}"
@@ -199,13 +198,15 @@ expression: |
   notification.subject.type == "PullRequest"
 
 # Non-draft PRs mentioning you
-expression: notification.reason == "mention"
-subject_expression: not subject.draft
+expression: |
+  notification.reason == "mention"
+  and notification.subject.type == "PullRequest"
+  and (not subject.draft)
 
 # Issues with specific labels
-expression: notification.subject.type == "Issue"
-subject_expression: |
-  subject.labels|selectattr('name', 'eq', 'bug')|first is defined
+expression: |
+  notification.subject.type == "Issue"
+  and (subject.labels|selectattr('name', 'eq', 'bug')|first is defined)
 ```
 
 ## Development

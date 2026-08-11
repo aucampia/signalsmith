@@ -7,7 +7,7 @@ from typing import Any, Self
 
 import jinja2
 import yaml
-from pydantic import TypeAdapter, model_validator
+from pydantic import ConfigDict, TypeAdapter, model_validator
 from pydantic.dataclasses import dataclass
 from xdg import xdg_config_home
 
@@ -67,7 +67,7 @@ DEFAULT_NOTICE_BODY = (
 )
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, config=ConfigDict(extra="forbid"))
 class NoticeConfig:
     """Top-level `notice:` block: the generic notice computed for every
     notification, before any rule-specific `notify.title`/`notify.body`
@@ -77,7 +77,7 @@ class NoticeConfig:
     body: str = DEFAULT_NOTICE_BODY
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, config=ConfigDict(extra="forbid"))
 class NotifyActionConfig:
     # Jinja templates (see `templating.py`); `None` defaults to the
     # corresponding rendered `notice.title`/`notice.body`.
@@ -85,17 +85,17 @@ class NotifyActionConfig:
     body: str | None = None
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, config=ConfigDict(extra="forbid"))
 class MarkAsReadActionConfig:
     pass
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, config=ConfigDict(extra="forbid"))
 class IgnoreActionConfig:
     pass
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, config=ConfigDict(extra="forbid"))
 class ActionDefinition:
     """Action definition that can be reused across multiple rules."""
 
@@ -111,7 +111,7 @@ class ActionDefinition:
         return self
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, config=ConfigDict(extra="forbid"))
 class RuleAction:
     """Action for a rule - either inline or by reference."""
 
@@ -135,11 +135,10 @@ class RuleAction:
         return self
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, config=ConfigDict(extra="forbid"))
 class Rule:
     id: str
     expression: str
-    subject_expression: str | None = None
     action: RuleAction
 
     @model_validator(mode="after")
@@ -151,19 +150,13 @@ class Rule:
         """
         from .. import templating
 
-        for field_name, expression in (
-            ("expression", self.expression),
-            ("subject_expression", self.subject_expression),
-        ):
-            if expression is None:
-                continue
-            try:
-                templating.compile_expression(expression)
-            except jinja2.TemplateSyntaxError as exc:
-                raise ValueError(
-                    f"Rule {self.id!r} has an invalid {field_name}: "
-                    f"{expression!r}: {exc}"
-                ) from exc
+        try:
+            templating.compile_expression(self.expression)
+        except jinja2.TemplateSyntaxError as exc:
+            raise ValueError(
+                f"Rule {self.id!r} has an invalid expression: "
+                f"{self.expression!r}: {exc}"
+            ) from exc
         return self
 
 
@@ -172,7 +165,7 @@ class Rule:
 RULE_ADAPTER: TypeAdapter[Rule] = TypeAdapter(Rule)
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, config=ConfigDict(extra="forbid"))
 class OrgMasks:
     """Organization filtering configuration."""
 
@@ -189,21 +182,21 @@ class OrgMasks:
         return self
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, config=ConfigDict(extra="forbid"))
 class Masks:
     """Notification filtering masks applied at API level."""
 
     orgs: OrgMasks = field(default_factory=OrgMasks)
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, config=ConfigDict(extra="forbid"))
 class SpoolConfig:
     """Configuration for the notified-notification spool."""
 
     dir: Path | None = None  # default: ${XDG_DATA_HOME}/signalsmith/spool
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, config=ConfigDict(extra="forbid"))
 class NotifyActionsConfig:
     """Interactive "Dismiss"/"Ignore" action buttons on notifications.
 
@@ -219,7 +212,7 @@ class NotifyActionsConfig:
     wait_timeout: int = 20  # seconds
 
 
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, config=ConfigDict(extra="forbid"))
 class Config:
     version: SchemaVersion = CONFIG_VERSION
     actions: dict[str, ActionDefinition] = field(default_factory=dict)
