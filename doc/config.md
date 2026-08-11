@@ -85,7 +85,6 @@ rules:
 # Interactive "Dismiss"/"Ignore" action buttons (optional). Only takes effect
 # in `signalsmith daemon` - see Clicking and Interactive Notifications below.
 # notify_actions:
-#   enabled: true
 #   max_concurrent: 5    # at most this many button-bearing notifications in flight at once
 #   wait_timeout: 20     # seconds; governs the concurrency limit above only
 ```
@@ -314,10 +313,10 @@ reference, a typo) falls back rather than dropping the notification -
 
 `signalsmith daemon` sends notifications via [`desktop-notifier`](https://github.com/samschott/desktop-notifier), which supports real click callbacks - unlike `signalsmith run`, which always sends a plain, non-interactive notification and exits immediately after.
 
-- **Click-to-open**: in `daemon` mode, clicking a notification opens `notification.subject.web_url` in the default browser, whenever a URL is available. This is unconditional - it's not gated by `notify_actions.enabled` below.
-- **`notify_actions.enabled`**: adds "Dismiss" (marks the notification as read on GitHub, like the `mark_as_read` rule action) and "Ignore" (see below) buttons to every notification. Also `daemon`-only.
-- **Permanent ignore**: the "Ignore" button records the subject in a durable store, consulted on **every** future run (both `run` and `daemon`, regardless of `notify_actions.enabled`) so that subject is never notified on again - distinct from the existing `ignore` rule action, which is transient and re-evaluated every run. Manage it with `signalsmith ignore list`/`remove`/`clear` (see [CLI Reference](./cli.md)).
-- **`notify_actions.max_concurrent`/`wait_timeout`**: at most `max_concurrent` button-bearing notifications are ever in flight at once; as soon as one resolves (clicked, button pressed, or `wait_timeout` seconds elapse) the next queued one is sent. Plain click-to-open notifications (buttons disabled) aren't subject to this limit.
+- **Click-to-open**: in `daemon` mode, clicking a notification opens `notification.subject.web_url` in the default browser, whenever a URL is available. This is always active in daemon mode.
+- **Dismiss and Ignore buttons**: every interactive notification includes "Dismiss" (marks the notification as read on GitHub, like the `mark_as_read` rule action) and, when a subject URL is available, "Ignore" (records the subject for permanent ignoring; see below) buttons.
+- **Permanent ignore**: the "Ignore" button records the subject in a durable store, consulted on **every** future run (both `run` and `daemon`) so that subject is never notified on again - distinct from the existing `ignore` rule action, which is transient and re-evaluated every run. Manage it with `signalsmith ignore list`/`remove`/`clear` (see [CLI Reference](./cli.md)).
+- **`notify_actions.max_concurrent`/`wait_timeout`**: at most `max_concurrent` notifications are ever in flight at once; as soon as one resolves (clicked, button pressed, or `wait_timeout` seconds elapse) the next queued one is sent. This throttling only applies in daemon mode.
 - **Why `daemon`-only**: `desktop-notifier`'s click/button callbacks only fire while its event loop is actively running. `signalsmith run` exits right after sending, so it can never observe a later interaction - `daemon`'s persistent background thread is what makes this work. `daemon --non-interactive` opts back out to the same plain, non-interactive send `run` always uses.
 - **Auto-expiry caveat**: on Linux, a notification the user doesn't interact with is silently auto-expired by the notification server - no callback fires at all. This means an unactioned button-bearing notification occupies its `max_concurrent` slot for the full `wait_timeout`, not just until it visually disappears.
 - **Platform support**: click/button callbacks are cross-platform in principle (Linux/D-Bus, macOS, Windows), but macOS may require a signed Python interpreter for notifications to work at all, and Windows toast notifications generally require a registered AppUserModelID via a Start Menu shortcut, which signalsmith doesn't provision - treat Windows support as best-effort/unverified.
@@ -358,7 +357,7 @@ Subjects ignored via the "Ignore" button (see [Clicking and Interactive Notifica
 
 - **Location**: `${XDG_DATA_HOME}/signalsmith/ignored/<sanitized-subject-url>.json` - lives under the same state root as the spool, sharing its version marker (no separate version kind).
 - Each entry records the subject's API URL (the key), when it was added, and its title/repository/type for display.
-- Consulted on **every** run (`run` and `daemon` alike) before rule evaluation - an ignored subject never triggers a subject fetch or gets notified on again, regardless of `notify_actions.enabled`.
+- Consulted on **every** run (`run` and `daemon` alike) before rule evaluation - an ignored subject never triggers a subject fetch or gets notified on again.
 - Unlike the spool, entries here are permanent by design: there's no `reap`/trash lifecycle. `signalsmith ignore remove <subject-url>` or `signalsmith ignore clear` hard-delete.
 - Inspect with `signalsmith ignore list` (see [CLI Reference](./cli.md)).
 
@@ -377,31 +376,28 @@ What happens on an incompatible version differs by kind:
 
 A fresh (missing or empty) state/cache directory silently gets today's version marker written to it — no warning on first run.
 
-### What changed from 3.0
+### What changed from 4.0
 
-Version 4.0 eliminates the `subject_expression` field. Rules now have a single
-`expression` that can reference both `notification` and `subject`. The subject
-is fetched lazily on first attribute access, so the cost guard remains: put
-cheap `notification.*` checks leftmost in an `and` chain.
+Version 5.0 removes the `notify_actions.enabled` field. Dismiss and Ignore
+buttons are now always present in `signalsmith daemon` (interactive) mode —
+there is no flag to suppress them. `notify_actions` still accepts
+`max_concurrent` / `wait_timeout`.
 
-**Migration**: For each rule with both fields, combine them into a single
-`expression`:
+**Migration**: Delete `enabled:` from the `notify_actions` block and bump
+`version:` to `'5.0'`:
 
 ```yaml
-# Before (3.0):
-expression: 'notification.subject.type == "PullRequest"'
-subject_expression: 'subject.merged or subject.state == "closed"'
+# Before (4.0):
+notify_actions:
+  enabled: true
+  max_concurrent: 5
+  wait_timeout: 20
 
-# After (4.0):
-expression: >
-  notification.subject.type == "PullRequest"
-  and (subject.merged or subject.state == "closed")
+# After (5.0):
+notify_actions:
+  max_concurrent: 5
+  wait_timeout: 20
 ```
 
-**Wrap the subject half in parens** — `a and b or c` reassociates incorrectly
-without them.
-
-**Unknown config keys are now hard errors.** If you bump `version: '4.0'` but
-forget to delete `subject_expression:`, the config will fail to load with
-`unexpected_keyword_argument` naming the stray field, rather than silently
-ignoring it (which would widen the rule to match on the cheap half alone).
+A leftover `enabled:` line with `version: '5.0'` will produce a
+`ValidationError` since unknown keys are hard errors (introduced in 4.0).

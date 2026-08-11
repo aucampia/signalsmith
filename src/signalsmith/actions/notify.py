@@ -48,29 +48,29 @@ class NotifyAction:
             send_notification(rendered)
             return
 
+        runtime = self.notify_runtime
+        runtime.dispatcher.wait_for_slot(
+            runtime.max_concurrent,
+            timeout=runtime.wait_timeout,
+        )
+
         buttons: list[Button] = []
-        if self.notify_runtime.actions_enabled:
-            self.notify_runtime.dispatcher.wait_for_slot(
-                self.notify_runtime.max_concurrent,
-                timeout=self.notify_runtime.wait_timeout,
-            )
-            notification = self.notification
-            runtime = self.notify_runtime
+        notification = self.notification
 
-            def _on_dismiss() -> None:
-                runtime.provider.mark_as_read(notification.id)
+        def _on_dismiss() -> None:
+            runtime.provider.mark_as_read(notification.id)
 
-            buttons.append(Button(title="Dismiss", on_pressed=_on_dismiss))
+        buttons.append(Button(title="Dismiss", on_pressed=_on_dismiss))
 
-            subject_url = notification.subject.url
-            if subject_url is not None:
+        subject_url = notification.subject.url
+        if subject_url is not None:
 
-                def _on_ignore() -> None:
-                    runtime.ignore_store.add(subject_url, notification)
+            def _on_ignore() -> None:
+                runtime.ignore_store.add(subject_url, notification)
 
-                buttons.append(Button(title="Ignore", on_pressed=_on_ignore))
+            buttons.append(Button(title="Ignore", on_pressed=_on_ignore))
 
-        self.notify_runtime.dispatcher.send(rendered, buttons=buttons)
+        runtime.dispatcher.send(rendered, buttons=buttons)
 
     def execute(self, dry_run: bool = False) -> None:
         """Send the notification or print dry-run message."""

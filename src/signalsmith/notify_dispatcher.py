@@ -81,7 +81,7 @@ class NotificationDispatcher:
                 if not self._supports_buttons:
                     logger.warning(
                         "The connected notification server does not advertise "
-                        "action button support; notify_actions buttons may not "
+                        "action button support; Dismiss/Ignore buttons may not "
                         "be visible or clickable"
                     )
         return self._supports_buttons

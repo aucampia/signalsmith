@@ -203,11 +203,9 @@ class NotifyActionsConfig:
     Only takes effect in `signalsmith daemon` (not `run`, and not with `daemon
     --non-interactive`): a one-shot process can't stay alive to catch a
     button press. `max_concurrent`/`wait_timeout` govern the sliding-window
-    concurrency limit on button-bearing notifications only - plain
-    click-to-open notifications aren't throttled.
+    concurrency limit on interactive notifications.
     """
 
-    enabled: bool = False
     max_concurrent: int = 5
     wait_timeout: int = 20  # seconds
 

@@ -77,7 +77,7 @@ def test_execute_without_runtime_uses_plain_send(
     assert rendered.body == "Message"
 
 
-def test_execute_with_runtime_disabled_sends_no_buttons(
+def test_execute_with_runtime_sends_dismiss_and_ignore_buttons(
     notification: GitHubNotification, spool: SpoolManager
 ) -> None:
     dispatcher = MagicMock()
@@ -87,31 +87,6 @@ def test_execute_with_runtime_disabled_sends_no_buttons(
         dispatcher=dispatcher,
         provider=provider,
         ignore_store=ignore_store,
-        actions_enabled=False,
-        max_concurrent=5,
-        wait_timeout=20,
-    )
-
-    action = make_action(notification, spool, notify_runtime=runtime)
-    action.execute(dry_run=False)
-
-    dispatcher.wait_for_slot.assert_not_called()
-    dispatcher.send.assert_called_once()
-    _, kwargs = dispatcher.send.call_args
-    assert kwargs["buttons"] == []
-
-
-def test_execute_with_actions_enabled_sends_dismiss_and_ignore_buttons(
-    notification: GitHubNotification, spool: SpoolManager
-) -> None:
-    dispatcher = MagicMock()
-    provider = MagicMock()
-    ignore_store = MagicMock()
-    runtime = NotifyRuntime(
-        dispatcher=dispatcher,
-        provider=provider,
-        ignore_store=ignore_store,
-        actions_enabled=True,
         max_concurrent=5,
         wait_timeout=20,
     )
@@ -133,7 +108,7 @@ def test_execute_with_actions_enabled_sends_dismiss_and_ignore_buttons(
     )
 
 
-def test_execute_with_actions_enabled_and_no_subject_url_omits_ignore_button(
+def test_execute_with_runtime_and_no_subject_url_omits_ignore_button(
     notification: GitHubNotification, spool: SpoolManager
 ) -> None:
     notification = replace(
@@ -144,7 +119,6 @@ def test_execute_with_actions_enabled_and_no_subject_url_omits_ignore_button(
         dispatcher=dispatcher,
         provider=MagicMock(),
         ignore_store=MagicMock(),
-        actions_enabled=True,
         max_concurrent=5,
         wait_timeout=20,
     )
@@ -168,7 +142,6 @@ def test_execute_dry_run_never_sends(
         dispatcher=dispatcher,
         provider=MagicMock(),
         ignore_store=MagicMock(),
-        actions_enabled=True,
         max_concurrent=5,
         wait_timeout=20,
     )
