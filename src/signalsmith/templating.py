@@ -24,7 +24,6 @@ must not silently read as "no match", so it propagates and the notification
 is reported as errored (see `rules.RuleMatcher`).
 """
 
-import json
 import logging
 from collections.abc import Mapping
 from typing import Any
@@ -134,7 +133,7 @@ class LazySubject(Mapping[str, Any]):
 
         # Store the pydantic model and dump to the same shape build_context produces
         self._pydantic_model = subject
-        self._data = json.loads(subject.model_dump_json())
+        self._data = subject.model_dump(mode="json")
         return self._data
 
     def __getattr__(self, name: str) -> Any:
@@ -374,7 +373,7 @@ def build_context(
         "variables": variables,
     }
     if subject is not None:
-        context["subject"] = json.loads(subject.model_dump_json())
+        context["subject"] = subject.model_dump(mode="json")
     return context
 
 
