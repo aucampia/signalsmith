@@ -21,6 +21,5 @@ class NotifyRuntime:
     dispatcher: NotificationDispatcher
     provider: NotificationProvider
     ignore_store: IgnoreStore
-    actions_enabled: bool  # gates the Dismiss/Ignore buttons only
     max_concurrent: int
     wait_timeout: int

@@ -207,7 +207,6 @@ class NotifyActionsConfig:
     click-to-open notifications aren't throttled.
     """
 
-    enabled: bool = False
     max_concurrent: int = 5
     wait_timeout: int = 20  # seconds
 

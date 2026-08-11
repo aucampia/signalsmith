@@ -1,6 +1,6 @@
 # signalsmith configuration
 # Auto-dismiss GitHub notification spam, alert only on what matters
-version: '4.0'
+version: '5.0'
 # Seconds between re-notifications for persistent unread items
 renotify_interval: 3600
 # Seconds between polls in daemon mode. This is a lower bound - signalsmith
@@ -11,10 +11,7 @@ poll_interval: 60
 # "notify" = alert by default, write ignore rules for spam
 # "ignore" = silent by default, write notify rules for important items
 default_action: notify
-# Interactive "Dismiss"/"Ignore" action buttons. Only takes effect in
-# `signalsmith daemon` (not `signalsmith run` or `daemon --non-interactive`).
-notify_actions:
-  enabled: true
+notify_actions: {}
 # Generic notice computed for every notification; reviewer_or_assignee below
 # uses it verbatim via `notify: {}`.
 notice:
@@ -27,14 +24,15 @@ notice:
 #       - example-corp
 #       - example-labs
 variables:
-  # PRs from these repos are relevant to me, and should be notified on.
+  # Repos for which notifications are relevant to me, even if I'm not a
+  # direct assignee or reviewer. Always notify.
   ontopic:
     prefixes:
       - example-corp/proj-1234-
     repos:
       - example-labs/widget-backend
-  # PRs from these repos are not relevant to me, and are very noisy (lots of
-  # team-based review requests). Mark as read.
+  # Repos for which notifications are not relevant to me unless I'm a
+  # direct assignee or reviewer. Mark as read.
   offtopic:
     prefixes:
       - example-platform/infra-
@@ -44,19 +42,20 @@ variables:
       - example-platform/prod-shared
       - example-platform/vpn-certs
       - example-oss/some-library
-  # Not relevant. Mark as read.
+  # Bots which create PRs that are not relevant to me. Mark as read.
   spam_bots:
     - dependabot[bot]
     - release-bot[bot]
-  # If only these teams are mentioned in a PR review request then it's not
-  # specific enough to be a real review request, it's just noise. Mark as read.
+  # Teams which does not signify a clear review request. If a PR only
+  # requests review from these teams and no other teams, mark as read.
   spam_teams:
     - {org: example-corp, slug: deploy-bots}
     - {org: example-platform, slug: team-cloud}
     - {org: example-platform, slug: team-sre}
 rules:
-  # Notify when I'm explicitly an assignee or requested reviewer.
-  # Team/CODEOWNERS-based review requests don't count - only direct.
+  # Always notify me when I'm explicitly an assignee or requested
+  # reviewer. (team/CODEOWNERS-based review requests don't count - only
+  # direct.)
   - id: reviewer_or_assignee
     expression: >
       notification.subject.type in ["Issue", "PullRequest"]
@@ -68,7 +67,8 @@ rules:
       )
     action:
       notify: {}
-  # On-topic repos are relevant - notify.
+  # Always notify me for PRs from ontopic repos, even if I'm not a
+  # direct assignee/reviewer.
   - id: on_topic_notify
     expression: >
       (
@@ -80,16 +80,16 @@ rules:
           in variables.get('ontopic', {}).get('repos', []))
     action:
       notify: {}
-  # Merged or closed PRs I'm not a direct assignee/reviewer on are done -
-  # mark as read.
+  # Mark notifications as read if the PR is closed or merged, since it's
+  # no longer relevant.
   - id: closed_pr_mark_as_read
     expression: >
       notification.subject.type == "PullRequest"
       and (subject.merged or subject.state == "closed")
     action:
       mark_as_read: {}
-  # PR review requests where *every* requested team is a known auto-approval
-  # group are pure deploy-gate noise - mark as read.
+  # Mark notifications as read if they only request review from spam
+  # teams and no other teams.
   - id: spam_team_mark_as_read
     expression: >
       notification.subject.type == "PullRequest"
@@ -107,16 +107,14 @@ rules:
       )
     action:
       mark_as_read: {}
-  # Auto-generated PRs opened by known bot users - mark as read.
+  # Mark PRs from some bots as read, since they are not relevant to me.
   - id: bot_pr_mark_as_read
     expression: >
       notification.subject.type == "PullRequest"
       and (subject.user.login in variables.get('spam_bots', []))
     action:
       mark_as_read: {}
-  # Off-topic repos are noisy (team-based review requests etc). Anything not
-  # already caught above (i.e. not me as direct assignee/reviewer) gets
-  # marked as read instead of just ignored.
+  # Mark PRs from known off-topic repos as read.
   - id: off_topic_mark_as_read
     expression: >
       (

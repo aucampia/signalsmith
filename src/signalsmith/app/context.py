@@ -110,7 +110,6 @@ def open_notify_runtime(
         dispatcher=dispatcher,
         provider=provider,
         ignore_store=ignore_store,
-        actions_enabled=config.notify_actions.enabled,
         max_concurrent=config.notify_actions.max_concurrent,
         wait_timeout=config.notify_actions.wait_timeout,
     )

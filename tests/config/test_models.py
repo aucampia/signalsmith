@@ -45,17 +45,17 @@ def test_config_load_wrong_major_is_refused(tmp_path: Path) -> None:
 
 
 def test_config_load_version_3_0_is_refused(tmp_path: Path) -> None:
-    """Version 3.0 is incompatible with 4.0 (major version bump)."""
+    """Version 3.0 is incompatible with 5.0 (major version bump)."""
     config_path = _write_config(tmp_path, "version: '3.0'\n" + _MINIMAL_RULES)
     with pytest.raises(VersionError) as exc_info:
         Config.load(config_path)
     assert "3.0" in str(exc_info.value)
-    assert "4.0" in str(exc_info.value)
+    assert "5.0" in str(exc_info.value)
 
 
 @pytest.mark.parametrize(
     ("version", "expect_warning"),
-    [("4.0", False), ("4.9", True)],
+    [("5.0", False), ("5.9", True)],
     ids=["matching", "newer-minor"],
 )
 def test_config_load_compatible_version_loads(
@@ -80,7 +80,7 @@ def test_config_default_version_is_current() -> None:
             )
         ]
     )
-    assert str(config.version) == "4.0"
+    assert str(config.version) == "5.0"
 
 
 @pytest.mark.parametrize(

@@ -95,7 +95,7 @@ def test_open_notify_runtime_returns_none_when_dispatcher_fails_to_start(
         "signalsmith.app.context.NotificationDispatcher",
         MagicMock(side_effect=RuntimeError("no dbus")),
     )
-    config = _minimal_config(notify_actions=NotifyActionsConfig(enabled=True))
+    config = _minimal_config(notify_actions=NotifyActionsConfig())
 
     result = open_notify_runtime(config, MagicMock(), MagicMock())
 
@@ -111,9 +111,7 @@ def test_open_notify_runtime_builds_runtime_from_config(
         MagicMock(return_value=dispatcher),
     )
     config = _minimal_config(
-        notify_actions=NotifyActionsConfig(
-            enabled=True, max_concurrent=3, wait_timeout=7
-        )
+        notify_actions=NotifyActionsConfig(max_concurrent=3, wait_timeout=7)
     )
     provider = MagicMock()
     ignore_store = MagicMock()
@@ -124,6 +122,5 @@ def test_open_notify_runtime_builds_runtime_from_config(
     assert runtime.dispatcher is dispatcher
     assert runtime.provider is provider
     assert runtime.ignore_store is ignore_store
-    assert runtime.actions_enabled is True
     assert runtime.max_concurrent == 3
     assert runtime.wait_timeout == 7
