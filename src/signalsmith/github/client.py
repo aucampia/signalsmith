@@ -297,7 +297,7 @@ class GitHubClient:
             except Exception:
                 logger.warning("Failed to load cached user; refetching", exc_info=True)
 
-        with httpx.Client() as client:
+        with httpx.Client(timeout=10.0) as client:
             response = client.get(f"{_API_BASE}/user", headers=self._headers())
             self._check_rate_limit(response.headers)
             response.raise_for_status()
@@ -308,7 +308,7 @@ class GitHubClient:
 
     def mark_as_read(self, notification_id: str) -> None:
         logger.debug("Marking notification %s as read", notification_id)
-        with httpx.Client() as client:
+        with httpx.Client(timeout=10.0) as client:
             response = client.patch(
                 f"{_API_BASE}/notifications/threads/{notification_id}",
                 headers=self._headers(),
