@@ -9,25 +9,19 @@ permanent until manually removed, so - unlike the spool - there's no
 """
 
 import logging
-import re
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from ..github.models import GitHubNotification
+from ._sanitize import _sanitize
 from .models import IGNORED_ENTRY_ADAPTER, IgnoredEntry
 from .spool import SpoolManager
 
 logger = logging.getLogger(__name__)
 
 __all__: list[str] = []
-
-_SANITIZE_RE = re.compile(r"[^A-Za-z0-9._-]")
-
-
-def _sanitize(value: str) -> str:
-    return _SANITIZE_RE.sub("_", value)
 
 
 @dataclass

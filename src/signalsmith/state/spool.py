@@ -14,7 +14,6 @@ sweeps it) instead.
 
 import json
 import logging
-import re
 import shutil
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
@@ -27,6 +26,7 @@ from ..cache import resolve_cache_dir
 from ..config.models import RULE_ADAPTER, Config, Rule
 from ..github.models import GitHubIssue, GitHubNotification, GitHubPullRequest
 from ..versioning import STATE_VERSION, ensure_store_version
+from ._sanitize import _sanitize
 from .models import SPOOL_ENTRY_ADAPTER, SpoolEntry, SpoolNotifyEvent
 
 logger = logging.getLogger(__name__)
@@ -34,11 +34,6 @@ logger = logging.getLogger(__name__)
 __all__: list[str] = []
 
 _MAX_NOTIFY_EVENTS = 20
-_SANITIZE_RE = re.compile(r"[^A-Za-z0-9._-]")
-
-
-def _sanitize(value: str) -> str:
-    return _SANITIZE_RE.sub("_", value)
 
 
 @dataclass
