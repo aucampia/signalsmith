@@ -9,7 +9,6 @@ fields from a `notified` outcome are carried forward on overwrite when missing.
 
 import json
 import logging
-import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -17,18 +16,13 @@ from pathlib import Path
 
 from ..github.models import GitHubIssue, GitHubNotification, GitHubPullRequest
 from ..notification.models import NotificationOutcome
+from ._sanitize import _sanitize
 from .models import HISTORY_ENTRY_ADAPTER, HistoryEntry
 from .spool import SpoolManager
 
 logger = logging.getLogger(__name__)
 
 __all__: list[str] = []
-
-_SANITIZE_RE = re.compile(r"[^A-Za-z0-9._-]")
-
-
-def _sanitize(value: str) -> str:
-    return _SANITIZE_RE.sub("_", value)
 
 
 @dataclass
