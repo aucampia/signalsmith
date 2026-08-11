@@ -436,10 +436,10 @@ class TestLazySubject:
         dump_count = 0
 
         class CountingIssue(GitHubIssue):
-            def model_dump_json(self, **kwargs: Any) -> Any:
+            def model_dump(self, **kwargs: Any) -> Any:
                 nonlocal dump_count
                 dump_count += 1
-                return super().model_dump_json(**kwargs)
+                return super().model_dump(**kwargs)
 
         def fetcher(url: str, type: str, updated_at: str) -> Any:
             nonlocal call_count
