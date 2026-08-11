@@ -64,7 +64,6 @@ class ActionBuildContext:
 @dataclass(frozen=True, kw_only=True)
 class ActionSpec:
     kind: ActionKind
-    config_type: type
     build: Callable[[ActionBuildContext, Any], Action]
 
 
@@ -161,15 +160,9 @@ def _build_ignore(ctx: ActionBuildContext, action_config: IgnoreActionConfig) ->
 
 
 ACTION_SPECS: dict[ActionKind, ActionSpec] = {
-    ActionKind.NOTIFY: ActionSpec(
-        kind=ActionKind.NOTIFY, config_type=NotifyActionConfig, build=_build_notify
-    ),
+    ActionKind.NOTIFY: ActionSpec(kind=ActionKind.NOTIFY, build=_build_notify),
     ActionKind.MARK_AS_READ: ActionSpec(
-        kind=ActionKind.MARK_AS_READ,
-        config_type=MarkAsReadActionConfig,
-        build=_build_mark_as_read,
+        kind=ActionKind.MARK_AS_READ, build=_build_mark_as_read
     ),
-    ActionKind.IGNORE: ActionSpec(
-        kind=ActionKind.IGNORE, config_type=IgnoreActionConfig, build=_build_ignore
-    ),
+    ActionKind.IGNORE: ActionSpec(kind=ActionKind.IGNORE, build=_build_ignore),
 }
