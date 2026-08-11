@@ -1,0 +1,15 @@
+# Covers the `off_topic_mark_as_read` rule: specific off-topic repos
+# (variables.offtopic.repos) are noisy - mark as read.
+version: '2.0'
+cases:
+  - name: issue in a listed off-topic repo is marked as read
+    parameters: '{{ variables.offtopic.repos }}'
+    input:
+      notification:
+        subject:
+          type: Issue
+        repository:
+          full_name: '{{ parameter }}'
+    expect:
+      rule: off_topic_mark_as_read
+      action: mark_as_read

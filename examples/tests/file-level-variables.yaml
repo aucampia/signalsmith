@@ -1,0 +1,52 @@
+# Tests file-level `variables:` override.
+# Cases inherit the file-level variables unless they override at case level.
+version: '2.1'
+# File-level: keep only spam_bots, drop everything else
+variables:
+  spam_bots: "{{ config.variables.spam_bots }}"
+cases:
+  # These cases inherit the file-level variables (only spam_bots defined)
+  - name: file-level vars inherited - ontopic repo does not match
+    input:
+      notification:
+        subject:
+          type: Issue
+        repository:
+          full_name: 'example-labs/widget-backend'
+    expect:
+      rule: null
+      action: notify
+  - name: file-level vars inherited - offtopic repo does not match
+    input:
+      notification:
+        subject:
+          type: Issue
+        repository:
+          full_name: 'example-platform/infra-sample-repo'
+    expect:
+      rule: null
+      action: notify
+  - name: file-level vars inherited - bot still matches
+    input:
+      notification:
+        subject:
+          type: PullRequest
+      subject:
+        user:
+          login: 'dependabot[bot]'
+    expect:
+      rule: bot_pr_mark_as_read
+      action: mark_as_read
+  # Case-level override replaces file-level wholesale
+  - name: case overrides file-level - now nothing is defined
+    variables: {}
+    input:
+      notification:
+        subject:
+          type: PullRequest
+      subject:
+        user:
+          login: 'dependabot[bot]'
+    expect:
+      rule: null
+      action: notify

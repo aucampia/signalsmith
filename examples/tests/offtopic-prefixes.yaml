@@ -1,0 +1,17 @@
+# Covers the `off_topic_mark_as_read` rule: repos under a known off-topic
+# prefix (variables.offtopic.prefixes) are noisy - mark as read. Uses an Issue
+# so the PR-only rules (closed_pr/spam_team/bot_pr) skip on stage 1 without
+# needing a subject fetch.
+version: '2.0'
+cases:
+  - name: issue in an off-topic-prefixed repo is marked as read
+    parameters: '{{ variables.offtopic.prefixes }}'
+    input:
+      notification:
+        subject:
+          type: Issue
+        repository:
+          full_name: '{{ parameter }}sample-repo'
+    expect:
+      rule: off_topic_mark_as_read
+      action: mark_as_read

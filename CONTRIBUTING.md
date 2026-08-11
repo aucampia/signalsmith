@@ -62,12 +62,16 @@ signalsmith/
 │   │   └── test_ignore_store.py
 │   ├── conftest.py       # Shared fixtures (MockProvider, minimal Config, ...)
 │   ├── test_cli.py
+│   ├── test_examples.py  # Validate examples/ config and tests
 │   ├── test_notifier.py
 │   ├── test_notify_dispatcher.py
 │   ├── test_processor.py
 │   ├── test_rules.py
 │   ├── test_templating.py
 │   └── test_versioning.py
+├── examples/             # Example configuration and rule tests
+│   ├── config.yaml       # Complete working config with common filtering patterns
+│   └── tests/            # Rule test suite for the example config
 ├── doc/                  # Reference documentation
 │   ├── config.md         # Configuration file reference
 │   ├── test-format.md    # Test file format
@@ -165,6 +169,10 @@ uv run signalsmith daemon --poll-interval 300
 - Aim for good coverage of core logic (Jinja filters, processing, API client)
 
 ## Configuration Files
+
+Example config files live in `examples/`:
+- **[`examples/config.yaml`](examples/config.yaml)** - Complete working configuration with common filtering patterns
+- **[`examples/tests/*.yaml`](examples/tests/)** - Rule test suite for the example config
 
 User configs go in `~/.config/signalsmith/config.yaml` (not tracked in git).
 
