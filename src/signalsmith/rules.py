@@ -74,8 +74,9 @@ class RuleMatcher:
             except templating.SubjectUnavailableError as e:
                 raise RuntimeError(
                     f"Rule {rule.id!r} expression cannot be evaluated: it references `subject`, but "
-                    f"subject type {e.subject_type!r} is not supported.\n"
+                    f"the subject is unavailable.\n"
                     f"  Error: {e}\n"
+                    f"  Subject type: {e.subject_type}\n"
                     f"  Expression: {rule.expression}\n"
                     f"  Notification: {notification.debug_info}"
                 ) from e

@@ -181,6 +181,7 @@ def create_actions(
             if fetched_subject is not None:
                 return fetched_subject
             if fetch_error is not None:
+                # Re-raise the cached exception with its original traceback preserved
                 raise fetch_error
             try:
                 subject = provider.get_subject(url, type, updated_at)
