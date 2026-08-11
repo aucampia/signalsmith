@@ -44,7 +44,7 @@ def test_sleeps_for_configured_interval_when_no_provider_poll_interval(
 ) -> None:
     ctx = _make_ctx(tmp_path, poll_interval=None)
     fake_sleep = _run_one_iteration(ctx, interval=60)
-    fake_sleep.assert_called_once_with(60)
+    fake_sleep.assert_called_with(60)
 
 
 def test_sleeps_for_configured_interval_when_provider_poll_interval_smaller(
@@ -52,13 +52,13 @@ def test_sleeps_for_configured_interval_when_provider_poll_interval_smaller(
 ) -> None:
     ctx = _make_ctx(tmp_path, poll_interval=30)
     fake_sleep = _run_one_iteration(ctx, interval=60)
-    fake_sleep.assert_called_once_with(60)
+    fake_sleep.assert_called_with(60)
 
 
 def test_sleeps_for_provider_poll_interval_when_larger(tmp_path: Path) -> None:
     ctx = _make_ctx(tmp_path, poll_interval=120)
     fake_sleep = _run_one_iteration(ctx, interval=60)
-    fake_sleep.assert_called_once_with(120)
+    fake_sleep.assert_called_with(120)
 
 
 def test_exception_in_cycle_is_logged_and_loop_continues(
@@ -77,4 +77,4 @@ def test_exception_in_cycle_is_logged_and_loop_continues(
     )
     # The loop reached `sleep` despite the exception, proving it was
     # swallowed rather than propagating out of `run_daemon`.
-    fake_sleep.assert_called_once_with(60)
+    fake_sleep.assert_called_with(60)

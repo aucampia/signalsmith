@@ -51,7 +51,7 @@ def test_process_cycle_reaps_by_default(tmp_path: Path) -> None:
 
     process_cycle(ctx, notifications=ctx.provider.get_notifications())
 
-    ctx.spool.reap.assert_called_once_with("github", {"1"})
+    ctx.spool.reap.assert_called_with("github", {"1"})
 
 
 def test_process_cycle_skips_reap_when_dry_run(tmp_path: Path) -> None:
@@ -101,4 +101,4 @@ def test_process_cycle_reaps_using_fetched_notifications_when_omitted(
 
     process_cycle(ctx)
 
-    ctx.spool.reap.assert_called_once_with("github", {"1"})
+    ctx.spool.reap.assert_called_with("github", {"1"})

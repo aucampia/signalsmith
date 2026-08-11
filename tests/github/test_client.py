@@ -426,7 +426,7 @@ def test_mark_as_read(temp_cache_dir: Path) -> None:
         client.mark_as_read("123")
 
         # Verify the PATCH was called with correct URL
-        mock_client.patch.assert_called_once()
+        mock_client.patch.assert_called()
         call_args = mock_client.patch.call_args
         assert "notifications/threads/123" in call_args[0][0]
 

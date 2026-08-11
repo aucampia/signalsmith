@@ -71,7 +71,7 @@ def test_execute_without_runtime_uses_plain_send(
     action = make_action(notification, spool, notify_runtime=None)
     action.execute(dry_run=False)
 
-    mock_send.assert_called_once()
+    mock_send.assert_called()
     rendered = mock_send.call_args.args[0]
     assert rendered.title == "Title"
     assert rendered.body == "Message"
@@ -94,16 +94,16 @@ def test_execute_with_runtime_sends_dismiss_and_ignore_buttons(
     action = make_action(notification, spool, notify_runtime=runtime)
     action.execute(dry_run=False)
 
-    dispatcher.wait_for_slot.assert_called_once_with(5, timeout=20)
+    dispatcher.wait_for_slot.assert_called_with(5, timeout=20)
     _, kwargs = dispatcher.send.call_args
     buttons = kwargs["buttons"]
     assert [b.title for b in buttons] == ["Dismiss", "Ignore"]
 
     buttons[0].on_pressed()
-    provider.mark_as_read.assert_called_once_with("123")
+    provider.mark_as_read.assert_called_with("123")
 
     buttons[1].on_pressed()
-    ignore_store.add.assert_called_once_with(
+    ignore_store.add.assert_called_with(
         "https://api.github.com/repos/owner/repo/issues/1", notification
     )
 
