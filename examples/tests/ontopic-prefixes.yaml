@@ -1,0 +1,17 @@
+# Covers the `on_topic_notify` rule: repos under a known on-topic
+# prefix (variables.ontopic.prefixes) are relevant - notify. Uses an Issue
+# so the PR-only rules (closed_pr/spam_team/bot_pr) skip on stage 1 without
+# needing a subject fetch.
+version: '2.0'
+cases:
+  - name: issue in an on-topic-prefixed repo is notified
+    parameters: '{{ variables.ontopic.prefixes }}'
+    input:
+      notification:
+        subject:
+          type: Issue
+        repository:
+          full_name: '{{ parameter }}sample-repo'
+    expect:
+      rule: on_topic_notify
+      action: notify

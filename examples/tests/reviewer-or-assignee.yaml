@@ -1,0 +1,59 @@
+# Covers the `reviewer_or_assignee` rule in config.yaml: notify when I'm a
+# direct assignee or requested reviewer on an Issue/PR (team/CODEOWNERS-based
+# requests don't count).
+version: '2.0'
+input:
+  account:
+    github:
+      username: testuser
+cases:
+  - name: PR with me as assignee notifies
+    input:
+      notification:
+        subject:
+          type: PullRequest
+      subject:
+        assignees:
+          - login: testuser
+            id: 1
+            type: User
+    expect:
+      rule: reviewer_or_assignee
+      action: notify
+  - name: PR with me as requested reviewer notifies
+    input:
+      notification:
+        subject:
+          type: PullRequest
+      subject:
+        requested_reviewers:
+          - login: testuser
+            id: 1
+            type: User
+    expect:
+      rule: reviewer_or_assignee
+      action: notify
+  - name: Issue assigned to me notifies
+    input:
+      notification:
+        subject:
+          type: Issue
+      subject:
+        assignees:
+          - login: testuser
+            id: 1
+            type: User
+    expect:
+      rule: reviewer_or_assignee
+      action: notify
+  - name: PR involving neither me as assignee nor reviewer falls through to default notify
+    input:
+      notification:
+        subject:
+          type: PullRequest
+      subject:
+        assignees: []
+        requested_reviewers: []
+    expect:
+      rule: null
+      action: notify

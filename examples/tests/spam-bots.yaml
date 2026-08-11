@@ -1,0 +1,16 @@
+# Covers the `bot_pr_mark_as_read` rule: auto-generated PRs opened by known
+# bot users (variables.spam_bots) are marked as read.
+version: '2.0'
+cases:
+  - name: every configured spam bot's PR is marked as read
+    parameters: '{{ variables.spam_bots }}'
+    input:
+      notification:
+        subject:
+          type: PullRequest
+      subject:
+        user:
+          login: '{{ parameter }}'
+    expect:
+      rule: bot_pr_mark_as_read
+      action: mark_as_read

@@ -1,0 +1,139 @@
+# Tests that rules handle absent/empty variables gracefully.
+# Uses `variables:` override (new in test-file version 2.1) to simulate
+# a config where the user deleted or never defined a variable block.
+version: '2.1'
+cases:
+  # Absence: no variables defined at all
+  - name: all variables absent - ontopic repo does not error
+    variables: {}
+    input:
+      notification:
+        subject:
+          type: Issue
+        repository:
+          full_name: 'example-labs/widget-backend'
+    expect:
+      rule: null
+      action: notify
+  - name: all variables absent - offtopic repo does not error
+    variables: {}
+    input:
+      notification:
+        subject:
+          type: Issue
+        repository:
+          full_name: 'example-platform/infra-sample-repo'
+    expect:
+      rule: null
+      action: notify
+  - name: all variables absent - bot PR does not error
+    variables: {}
+    input:
+      notification:
+        subject:
+          type: PullRequest
+      subject:
+        user:
+          login: 'dependabot[bot]'
+    expect:
+      rule: null
+      action: notify
+  - name: all variables absent - spam team PR does not error
+    variables: {}
+    input:
+      notification:
+        subject:
+          type: PullRequest
+        repository:
+          full_name: 'example-corp/some-repo'
+      subject:
+        requested_teams:
+          - id: 123456
+            slug: 'deploy-bots'
+            name: 'Deploy Bots'
+    expect:
+      rule: null
+      action: notify
+  # Selective absence: only `ontopic` removed, everything else intact
+  - name: only ontopic removed - uses config.variables reconstruction
+    variables: "{{ dict(config.variables|items|rejectattr('0','eq','ontopic')|list) }}"
+    input:
+      notification:
+        subject:
+          type: Issue
+        repository:
+          full_name: 'example-labs/widget-backend'
+    expect:
+      rule: null
+      action: notify
+  # Empty-but-present: different code path from absence
+  - name: ontopic present but empty prefixes and repos
+    variables:
+      ontopic:
+        prefixes: []
+        repos: []
+      offtopic: "{{ config.variables.offtopic }}"
+      spam_bots: "{{ config.variables.spam_bots }}"
+      spam_teams: "{{ config.variables.spam_teams }}"
+    input:
+      notification:
+        subject:
+          type: Issue
+        repository:
+          full_name: 'example-labs/widget-backend'
+    expect:
+      rule: null
+      action: notify
+  - name: offtopic present but empty prefixes and repos
+    variables:
+      ontopic: "{{ config.variables.ontopic }}"
+      offtopic:
+        prefixes: []
+        repos: []
+      spam_bots: "{{ config.variables.spam_bots }}"
+      spam_teams: "{{ config.variables.spam_teams }}"
+    input:
+      notification:
+        subject:
+          type: Issue
+        repository:
+          full_name: 'example-platform/infra-sample-repo'
+    expect:
+      rule: null
+      action: notify
+  - name: spam_bots present but empty
+    variables:
+      ontopic: "{{ config.variables.ontopic }}"
+      offtopic: "{{ config.variables.offtopic }}"
+      spam_bots: []
+      spam_teams: "{{ config.variables.spam_teams }}"
+    input:
+      notification:
+        subject:
+          type: PullRequest
+      subject:
+        user:
+          login: 'dependabot[bot]'
+    expect:
+      rule: null
+      action: notify
+  - name: spam_teams present but empty
+    variables:
+      ontopic: "{{ config.variables.ontopic }}"
+      offtopic: "{{ config.variables.offtopic }}"
+      spam_bots: "{{ config.variables.spam_bots }}"
+      spam_teams: []
+    input:
+      notification:
+        subject:
+          type: PullRequest
+        repository:
+          full_name: 'example-corp/some-repo'
+      subject:
+        requested_teams:
+          - id: 123456
+            slug: 'deploy-bots'
+            name: 'Deploy Bots'
+    expect:
+      rule: null
+      action: notify

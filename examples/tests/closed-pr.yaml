@@ -1,0 +1,29 @@
+# Covers the `closed_pr_mark_as_read` rule: merged or closed PRs I'm not a
+# direct assignee/reviewer on are done - mark as read.
+version: '2.0'
+input:
+  notification:
+    subject:
+      type: PullRequest
+cases:
+  - name: merged or closed PRs are marked as read
+    parameters:
+      - state: open
+        merged: true
+      - state: closed
+        merged: false
+    input:
+      subject:
+        state: '{{ parameter.state }}'
+        merged: '{{ parameter.merged }}'
+    expect:
+      rule: closed_pr_mark_as_read
+      action: mark_as_read
+  - name: open unmerged PR falls through to default notify
+    input:
+      subject:
+        state: open
+        merged: false
+    expect:
+      rule: null
+      action: notify

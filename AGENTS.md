@@ -85,6 +85,10 @@ unrelated to each other and to the package version in `pyproject.toml`.
 - **Config/test files**: an incompatible version refuses to run (clear
   error, no fallback/auto-fix) and tells the user to update the file by
   hand.
+- **Examples**: when bumping `CONFIG_VERSION` or `TEST_VERSION` in
+  `src/signalsmith/versioning.py`, update `examples/config.yaml` and
+  `examples/tests/*.yaml` to match the new schema — this prevents the
+  examples from going stale.
 
 ## Data Models
 

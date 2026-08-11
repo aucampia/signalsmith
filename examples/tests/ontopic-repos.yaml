@@ -1,0 +1,15 @@
+# Covers the `on_topic_notify` rule: specific on-topic repos
+# (variables.ontopic.repos) are relevant - notify.
+version: '2.0'
+cases:
+  - name: issue in a listed on-topic repo is notified
+    parameters: '{{ variables.ontopic.repos }}'
+    input:
+      notification:
+        subject:
+          type: Issue
+        repository:
+          full_name: '{{ parameter }}'
+    expect:
+      rule: on_topic_notify
+      action: notify

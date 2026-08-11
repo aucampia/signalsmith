@@ -1,0 +1,21 @@
+# Covers the `spam_team_mark_as_read` rule: PRs where *every* requested team
+# is a known auto-approval group (variables.spam_teams) are pure deploy-gate
+# noise - mark as read.
+version: '2.0'
+cases:
+  - name: PR requesting only a known spam team is marked as read
+    parameters: '{{ variables.spam_teams }}'
+    input:
+      notification:
+        repository:
+          full_name: '{{ parameter.org }}/somerepo'
+        subject:
+          type: PullRequest
+      subject:
+        requested_teams:
+          - id: 1
+            name: Team
+            slug: '{{ parameter.id }}'
+    expect:
+      rule: spam_team_mark_as_read
+      action: mark_as_read

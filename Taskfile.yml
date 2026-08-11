@@ -98,6 +98,12 @@ tasks:
     desc: Run tests
     cmds:
       - "{{.RUN_PYTHON}} -m pytest {{.CLI_ARGS}}"
+  examples:test:
+    desc: Run example config tests via CLI
+    env:
+      SIGNALSMITH_CONFIG_DIR: examples
+    cmds:
+      - "{{.RUN_PREFIX}} signalsmith test"
   validate:static:
     desc: Perform static validation
     cmds:
@@ -125,6 +131,7 @@ tasks:
     cmds:
       - task: validate:static
       - task: test
+      - task: examples:test
   fix-and-validate:
     desc: Perform all validation
     cmds:

@@ -99,6 +99,21 @@ rules:
       notify: {}
 ```
 
+### Example Configurations
+
+See [`examples/config.yaml`](examples/config.yaml) for a complete working example with:
+- On-topic and off-topic repository filtering
+- Bot PR auto-dismissal
+- Team-based spam filtering
+- Direct assignee/reviewer notifications
+
+The [`examples/tests/`](examples/tests/) directory contains comprehensive rule tests
+for the example config. You can run them with:
+
+```bash
+SIGNALSMITH_CONFIG_DIR=examples signalsmith test
+```
+
 ## Testing Your Rules
 
 Write YAML test cases in a `tests/` directory (default: `<config dir>/tests`,
@@ -108,7 +123,7 @@ independent of where the config file itself lives — see
 
 ```yaml
 # ~/.config/signalsmith/tests/spam-bots.yaml
-version: '2.0'  # test file schema version (see doc/config.md#versioning)
+version: '2.1'  # test file schema version (see doc/config.md#versioning)
 cases:
   - name: bot PRs are marked as read
     parameters: '{{ variables.spam_bots }}'  # every bot login from your config's variables:
