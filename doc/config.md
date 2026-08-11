@@ -376,31 +376,28 @@ What happens on an incompatible version differs by kind:
 
 A fresh (missing or empty) state/cache directory silently gets today's version marker written to it — no warning on first run.
 
-### What changed from 3.0
+### What changed from 4.0
 
-Version 4.0 eliminates the `subject_expression` field. Rules now have a single
-`expression` that can reference both `notification` and `subject`. The subject
-is fetched lazily on first attribute access, so the cost guard remains: put
-cheap `notification.*` checks leftmost in an `and` chain.
+Version 5.0 removes the `notify_actions.enabled` field. Dismiss and Ignore
+buttons are now always present in `signalsmith daemon` (interactive) mode —
+there is no flag to suppress them. `notify_actions` still accepts
+`max_concurrent` / `wait_timeout`.
 
-**Migration**: For each rule with both fields, combine them into a single
-`expression`:
+**Migration**: Delete `enabled:` from the `notify_actions` block and bump
+`version:` to `'5.0'`:
 
 ```yaml
-# Before (3.0):
-expression: 'notification.subject.type == "PullRequest"'
-subject_expression: 'subject.merged or subject.state == "closed"'
+# Before (4.0):
+notify_actions:
+  enabled: true
+  max_concurrent: 5
+  wait_timeout: 20
 
-# After (4.0):
-expression: >
-  notification.subject.type == "PullRequest"
-  and (subject.merged or subject.state == "closed")
+# After (5.0):
+notify_actions:
+  max_concurrent: 5
+  wait_timeout: 20
 ```
 
-**Wrap the subject half in parens** — `a and b or c` reassociates incorrectly
-without them.
-
-**Unknown config keys are now hard errors.** If you bump `version: '4.0'` but
-forget to delete `subject_expression:`, the config will fail to load with
-`unexpected_keyword_argument` naming the stray field, rather than silently
-ignoring it (which would widen the rule to match on the cheap half alone).
+A leftover `enabled:` line with `version: '5.0'` will produce a
+`ValidationError` since unknown keys are hard errors (introduced in 4.0).

@@ -21,7 +21,7 @@ Run one poll cycle and exit. Prints a run summary (see [Run Statistics](#run-sta
 
 ## `daemon`
 
-Run continuously, polling on a configurable interval. Unlike `run`, `daemon` sends notifications interactively by default (see [Clicking and Interactive Notifications](./config.md#clicking-and-interactive-notifications)): clicking a notification opens its subject in a browser, and Dismiss/Ignore buttons are added.
+Run continuously, polling on a configurable interval. Unlike `run`, `daemon` sends notifications interactively by default (see [Clicking and Interactive Notifications](./config.md#clicking-and-interactive-notifications)): clicking a notification opens its subject in a browser, and Dismiss (always) and Ignore (when a subject URL is available) buttons are added.
 
 **Options:**
 - `--poll-interval SECONDS`: Override `poll_interval` from config (default: from config file).

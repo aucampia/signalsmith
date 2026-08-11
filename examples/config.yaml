@@ -46,7 +46,7 @@ variables:
   spam_bots:
     - dependabot[bot]
     - release-bot[bot]
-  # Teams which does not signify a clear review request. If a PR only
+  # Teams which do not signify a clear review request. If a PR only
   # requests review from these teams and no other teams, mark as read.
   spam_teams:
     - {org: example-corp, slug: deploy-bots}
