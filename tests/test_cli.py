@@ -6,6 +6,7 @@ these tests only check that the CLI commands parse flags correctly and call
 into `app`/`processor` with the right arguments.
 """
 
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -16,6 +17,13 @@ from signalsmith import cli as cli_module
 from signalsmith.app.context import AppContext
 from signalsmith.cli import cli
 from signalsmith.config.models import Config, DefaultAction
+from signalsmith.github.models import (
+    GitHubNotification,
+    GitHubRepository,
+    GitHubSubject,
+)
+from signalsmith.notification.models import NotificationOutcome
+from signalsmith.state.models import HistoryEntry
 
 runner = CliRunner()
 
@@ -37,6 +45,7 @@ def app_ctx() -> AppContext:
         config=Config(default_action=DefaultAction.IGNORE, rules=[]),
         provider=provider,
         spool=MagicMock(),
+        history_store=MagicMock(),
         ignore_store=MagicMock(),
     )
 
@@ -125,3 +134,118 @@ def test_cache_clean_reports_when_nothing_to_remove(
 
     assert result.exit_code == 0
     assert "No cache directory found" in result.output
+
+
+# ---------------------------------------------------------------------------
+# history list
+# ---------------------------------------------------------------------------
+
+
+def _make_notification() -> GitHubNotification:
+    return GitHubNotification(
+        id="456",
+        reason="mention",
+        unread=True,
+        updated_at="2026-06-17T00:00:00Z",
+        subject=GitHubSubject(
+            title="PR: fix thing",
+            url="https://api.github.com/repos/a/b/pulls/2",
+            type="PullRequest",
+        ),
+        repository=GitHubRepository(id=2, name="b", full_name="a/b"),
+        url="https://api.github.com/notifications/threads/456",
+        subscription_url="https://api.github.com/notifications/threads/456/sub",
+    )
+
+
+def _make_entry(
+    provider: str = "github",
+    notification_id: str = "456",
+    outcome: NotificationOutcome = NotificationOutcome.NOTIFIED,
+    rule_id: str = "r1",
+    rendered_title: str | None = "T",
+    rendered_body: str | None = "B",
+) -> HistoryEntry:
+    return HistoryEntry(
+        provider=provider,
+        notification_id=notification_id,
+        recorded_at=datetime(2026, 8, 11, tzinfo=UTC),
+        outcome=outcome,
+        rule_id=rule_id,
+        notification=_make_notification(),
+        rendered_title=rendered_title,
+        rendered_body=rendered_body,
+    )
+
+
+class TestHistoryList:
+    @pytest.fixture(autouse=True)
+    def _patch_history_store(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self.mock_store = MagicMock()
+        self.mock_store_class = MagicMock(return_value=self.mock_store)
+        monkeypatch.setattr(cli_module, "HistoryStore", self.mock_store_class)
+
+    def test_empty(self) -> None:
+        self.mock_store.entries.return_value = []
+
+        result = runner.invoke(cli, ["history", "list"])
+
+        assert result.exit_code == 0
+        assert "History is empty" in result.output
+
+    def test_default_format(self) -> None:
+        self.mock_store.entries.return_value = [
+            (Path("/none/github-456.json"), _make_entry()),
+        ]
+
+        result = runner.invoke(cli, ["history", "list"])
+
+        assert result.exit_code == 0
+        assert "github-456" in result.output
+        assert "notified" in result.output
+        assert "r1" in result.output
+        assert "PR: fix thing" in result.output
+
+    def test_json_format(self) -> None:
+        self.mock_store.entries.return_value = [
+            (Path("/none/github-456.json"), _make_entry()),
+        ]
+
+        result = runner.invoke(cli, ["history", "list", "--json"])
+
+        assert result.exit_code == 0
+        assert '"provider": "github"' in result.output
+        assert '"notification_id": "456"' in result.output
+        assert '"outcome": "notified"' in result.output
+
+    def test_action_filter_passed(self) -> None:
+        self.mock_store.entries.return_value = []
+
+        result = runner.invoke(cli, ["history", "list", "--action", "ignored"])
+
+        assert result.exit_code == 0
+        self.mock_store.entries.assert_called_once_with(limit=20, action="ignored")
+
+    def test_limit_passed(self) -> None:
+        self.mock_store.entries.return_value = []
+
+        result = runner.invoke(cli, ["history", "list", "--limit", "5"])
+
+        assert result.exit_code == 0
+        self.mock_store.entries.assert_called_once_with(limit=5, action=None)
+
+    def test_invalid_action(self) -> None:
+        result = runner.invoke(cli, ["history", "list", "--action", "bogus"])
+
+        assert result.exit_code != 0
+        assert "Invalid outcome" in result.output
+
+    def test_limit_zero(self) -> None:
+        result = runner.invoke(cli, ["history", "list", "--limit", "0"])
+
+        assert result.exit_code != 0
+
+    def test_limit_negative(self) -> None:
+        result = runner.invoke(cli, ["history", "list", "--limit", "-1"])
+
+        assert result.exit_code != 0

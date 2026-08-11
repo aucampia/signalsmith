@@ -8,6 +8,7 @@ from conftest import MockProvider
 from signalsmith.app.context import AppContext
 from signalsmith.app.daemon import run_daemon
 from signalsmith.config.models import Config, DefaultAction
+from signalsmith.state.history import HistoryStore
 from signalsmith.state.ignore_store import IgnoreStore
 from signalsmith.state.spool import SpoolManager
 
@@ -20,9 +21,14 @@ def _make_ctx(tmp_path: Path, poll_interval: int | None = None) -> AppContext:
     config = Config(default_action=DefaultAction.IGNORE, rules=[])
     provider = MockProvider([], poll_interval=poll_interval)
     spool = SpoolManager(tmp_path / "spool", tmp_path / "trash")
+    history_store = HistoryStore(tmp_path / "history")
     ignore_store = IgnoreStore(tmp_path / "ignored")
     return AppContext(
-        config=config, provider=provider, spool=spool, ignore_store=ignore_store
+        config=config,
+        provider=provider,
+        spool=spool,
+        history_store=history_store,
+        ignore_store=ignore_store,
     )
 
 

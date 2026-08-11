@@ -19,6 +19,7 @@ from ..config.models import Config
 from ..github.client import GitHubClient
 from ..notify_dispatcher import NotificationDispatcher
 from ..protocols import NotificationProvider
+from ..state.history import HistoryStore
 from ..state.ignore_store import IgnoreStore
 from ..state.spool import SpoolManager
 from .auth import resolve_github_token
@@ -41,6 +42,7 @@ class AppContext:
     config: Config
     provider: NotificationProvider
     spool: SpoolManager
+    history_store: HistoryStore
     ignore_store: IgnoreStore
     notify_runtime: NotifyRuntime | None = None
 
@@ -73,9 +75,14 @@ def build_app_context(
     spool = SpoolManager(
         SpoolManager.resolve_spool_dir(config), SpoolManager.resolve_trash_dir()
     )
+    history_store = HistoryStore(HistoryStore.resolve_dir())
     ignore_store = IgnoreStore(IgnoreStore.resolve_dir())
     return AppContext(
-        config=config, provider=provider, spool=spool, ignore_store=ignore_store
+        config=config,
+        provider=provider,
+        spool=spool,
+        history_store=history_store,
+        ignore_store=ignore_store,
     )
 
 

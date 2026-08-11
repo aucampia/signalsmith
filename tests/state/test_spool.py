@@ -440,7 +440,7 @@ def test_corrupt_spool_file_is_skipped_and_left_in_place(tmp_path: Path) -> None
 def test_ensure_state_version_fresh_dir_writes_marker(tmp_path: Path) -> None:
     state_dir = tmp_path / "state"
     SpoolManager.ensure_state_version(state_dir)
-    assert read_marker(state_dir) == SchemaVersion(major=2, minor=0)
+    assert read_marker(state_dir) == SchemaVersion(major=2, minor=1)
 
 
 def test_ensure_state_version_populated_dir_without_marker_raises(

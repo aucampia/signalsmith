@@ -17,9 +17,15 @@ from .config.models import Config
 from .config.testing import run_test_files
 from .errors import SignalsmithError
 from .logging_config import dump_logging_config, setup_logging
+from .notification.models import NotificationOutcome
 from .processor import build_account_context
+from .state.history import HistoryStore
 from .state.ignore_store import IgnoreStore
-from .state.models import IGNORED_ENTRY_ADAPTER, SPOOL_ENTRY_ADAPTER
+from .state.models import (
+    HISTORY_ENTRY_ADAPTER,
+    IGNORED_ENTRY_ADAPTER,
+    SPOOL_ENTRY_ADAPTER,
+)
 from .state.spool import SpoolManager
 
 logger = logging.getLogger(__name__)
@@ -37,6 +43,10 @@ ignore_cli = typer.Typer(
     pretty_exceptions_enable=False, help="Manage the permanent-ignore store."
 )
 cli.add_typer(ignore_cli, name="ignore")
+history_cli = typer.Typer(
+    pretty_exceptions_enable=False, help="View notification outcome history."
+)
+cli.add_typer(history_cli, name="history")
 
 
 def _open_spool(config: Config, *, check_version: bool = True) -> SpoolManager:
@@ -388,6 +398,84 @@ def ignore_clear(
     store = IgnoreStore(IgnoreStore.resolve_dir())
     removed = store.clear()
     print(f"Removed {removed} entries from the ignore store")
+
+
+def _validate_history_action(value: str | None) -> str | None:
+    if value is not None:
+        try:
+            NotificationOutcome(value)
+        except ValueError:
+            raise typer.BadParameter(
+                f"Invalid outcome {value!r}. Valid values: "
+                f"{', '.join(o.value for o in NotificationOutcome)}"
+            ) from None
+    return value
+
+
+@history_cli.command("list")
+def history_list(
+    verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+    action: Annotated[
+        str | None,
+        typer.Option(
+            "--action",
+            help="Filter by outcome (e.g. notified, ignored, skipped, filtered_org).",
+            callback=_validate_history_action,
+        ),
+    ] = None,
+    limit: Annotated[
+        int,
+        typer.Option(
+            "--limit",
+            help="Max entries to show (default: 20).",
+            min=1,
+        ),
+    ] = 20,
+    as_json: Annotated[
+        bool,
+        typer.Option("--json", help="Dump full history entries as JSON instead."),
+    ] = False,
+) -> None:
+    """List recent notification outcome history."""
+    setup_logging(verbose)
+    store = HistoryStore(HistoryStore.resolve_dir())
+
+    entries = list(store.entries(limit=limit, action=action))
+
+    if not entries:
+        print("History is empty")
+        return
+
+    if as_json:
+        print(
+            json.dumps(
+                [
+                    HISTORY_ENTRY_ADAPTER.dump_python(entry, mode="json")
+                    for _, entry in entries
+                ],
+                indent=2,
+            )
+        )
+        return
+
+    for _, entry in entries:
+        print(
+            f"{entry.provider}-{entry.notification_id}  "
+            f"{entry.recorded_at.isoformat()}  "
+            f"{entry.outcome.value}  {entry.rule_id}"
+        )
+        print(
+            f"    {entry.notification.subject.type}: "
+            f"{entry.notification.subject.title} "
+            f"({entry.notification.repository.full_name}, "
+            f"reason: {entry.notification.reason})"
+        )
+        if entry.notification.subject.web_url is not None:
+            print(f"    {entry.notification.subject.web_url}")
+        if entry.rendered_title is not None:
+            print(f"    Title: {entry.rendered_title}")
+        if entry.rendered_body is not None:
+            print(f"    Body:  {entry.rendered_body}")
 
 
 def main() -> None:
