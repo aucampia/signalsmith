@@ -48,4 +48,4 @@ def test_execute_actions_dry_run_propagates_to_each_action() -> None:
 
     execute_actions([(NotificationOutcome.NOTIFIED, action)], dry_run=True)
 
-    action.execute.assert_called_with(dry_run=True)
+    action.execute.assert_called_once_with(dry_run=True)

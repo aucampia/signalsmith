@@ -101,4 +101,4 @@ def test_process_cycle_reaps_using_fetched_notifications_when_omitted(
 
     process_cycle(ctx)
 
-    ctx.spool.reap.assert_called_with("github", {"1"})
+    ctx.spool.reap.assert_called_once_with("github", {"1"})
