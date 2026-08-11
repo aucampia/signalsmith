@@ -1,10 +1,19 @@
 import logging
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
-from signalsmith.config.models import Config, IgnoreActionConfig, Rule, RuleAction
+from signalsmith.config.models import (
+    Config,
+    IgnoreActionConfig,
+    MarkAsReadActionConfig,
+    NoticeConfig,
+    NotifyActionConfig,
+    Rule,
+    RuleAction,
+)
 from signalsmith.versioning import VersionError
 
 _MINIMAL_RULES = """
@@ -35,9 +44,18 @@ def test_config_load_wrong_major_is_refused(tmp_path: Path) -> None:
     assert "Update the config file" in str(exc_info.value)
 
 
+def test_config_load_version_3_0_is_refused(tmp_path: Path) -> None:
+    """Version 3.0 is incompatible with 4.0 (major version bump)."""
+    config_path = _write_config(tmp_path, "version: '3.0'\n" + _MINIMAL_RULES)
+    with pytest.raises(VersionError) as exc_info:
+        Config.load(config_path)
+    assert "3.0" in str(exc_info.value)
+    assert "4.0" in str(exc_info.value)
+
+
 @pytest.mark.parametrize(
     ("version", "expect_warning"),
-    [("3.0", False), ("3.9", True)],
+    [("4.0", False), ("4.9", True)],
     ids=["matching", "newer-minor"],
 )
 def test_config_load_compatible_version_loads(
@@ -62,16 +80,15 @@ def test_config_default_version_is_current() -> None:
             )
         ]
     )
-    assert str(config.version) == "3.0"
+    assert str(config.version) == "4.0"
 
 
 @pytest.mark.parametrize(
     "kwargs",
     [
         {"expression": "a == && b"},
-        {"expression": "true", "subject_expression": "a == && b"},
     ],
-    ids=["expression", "subject_expression"],
+    ids=["expression"],
 )
 def test_rule_rejects_invalid_expression_syntax_at_load_time(
     kwargs: dict[str, str],
@@ -81,6 +98,46 @@ def test_rule_rejects_invalid_expression_syntax_at_load_time(
     with pytest.raises(ValidationError) as exc_info:
         Rule(id="bad", action=RuleAction(ignore=IgnoreActionConfig()), **kwargs)
     assert "bad" in str(exc_info.value)
+
+
+def test_rule_rejects_subject_expression_field() -> None:
+    """A Rule with the old subject_expression field raises ValidationError due to extra='forbid'."""
+    with pytest.raises(ValidationError) as exc_info:
+        Rule(
+            id="old_style",
+            expression="true",
+            subject_expression="subject.state == 'open'",  # type: ignore[call-arg]
+            action=RuleAction(ignore=IgnoreActionConfig()),
+        )
+    assert "subject_expression" in str(exc_info.value)
+    assert "unexpected_keyword_argument" in str(exc_info.value).lower()
+
+
+@pytest.mark.parametrize(
+    "dataclass_type,valid_kwargs,extra_key",
+    [
+        (NoticeConfig, {}, "unknown_field"),
+        (NotifyActionConfig, {}, "unknown_field"),
+        (MarkAsReadActionConfig, {}, "unknown_field"),
+        (
+            Rule,
+            {
+                "id": "test",
+                "expression": "true",
+                "action": RuleAction(ignore=IgnoreActionConfig()),
+            },
+            "typo_field",
+        ),
+        (Config, {"rules": []}, "unknown_top_level"),
+    ],
+)
+def test_unknown_key_rejected(
+    dataclass_type: type, valid_kwargs: dict[str, Any], extra_key: str
+) -> None:
+    """All config dataclasses have extra='forbid' and reject unknown keys."""
+    with pytest.raises(ValidationError) as exc_info:
+        dataclass_type(**valid_kwargs, **{extra_key: "should_fail"})
+    assert extra_key in str(exc_info.value)
 
 
 def _clear_path_env(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -34,7 +34,7 @@ class RuleMatcher:
         subject_fetcher: Callable[[str, str, str], GitHubIssue | GitHubPullRequest]
         | None = None,
     ) -> Rule | None:
-        """Find first matching rule using two-stage rule evaluation.
+        """Find first matching rule.
 
         Args:
             notification: The notification to match
@@ -47,6 +47,18 @@ class RuleMatcher:
         context = templating.build_context(
             notification, None, self._account, self._variables
         )
+        # `subject` is lazy: the fetch only happens if an expression actually touches
+        # it, so a cheap `notification.*` guard on the left of `and` still guards the
+        # API call - see doc/config.md#lazy-subject-access.
+        if subject_fetcher is None:
+
+            def _no_fetcher(url: str, type: str, updated_at: str) -> Any:
+                raise templating.SubjectUnavailableError(
+                    "no subject fetcher was provided", type, url
+                )
+
+            subject_fetcher = _no_fetcher
+        context["subject"] = templating.LazySubject(notification, subject_fetcher)
 
         skipped: list[str] = []
         matched_rule: Rule | None = None
@@ -57,12 +69,24 @@ class RuleMatcher:
                 rule.id,
                 notification.debug_info,
             )
-            # Stage 1: Evaluate expression against notification
             try:
                 result = templating.evaluate(rule.expression, context)
-                if not result:
-                    skipped.append(rule.id)
-                    continue  # Stage 1 failed, skip this rule
+            except templating.SubjectUnavailableError as e:
+                raise RuntimeError(
+                    f"Rule {rule.id!r} expression cannot be evaluated: it references `subject`, but "
+                    f"subject type {e.subject_type!r} is not supported.\n"
+                    f"  Error: {e}\n"
+                    f"  Expression: {rule.expression}\n"
+                    f"  Notification: {notification.debug_info}"
+                ) from e
+            except templating.SubjectFetchError as e:
+                raise RuntimeError(
+                    f"Failed to fetch subject for rule {rule.id!r}:\n"
+                    f"  Error: {e}\n"
+                    f"  Expression: {rule.expression}\n"
+                    f"  Subject type: {e.subject_type}\n"
+                    f"  Notification: {notification.debug_info}"
+                ) from e
             except jinja2.TemplateError as e:
                 raise RuntimeError(
                     f"Jinja expression error for rule {rule.id!r} expression on notification {notification.id}:\n"
@@ -78,68 +102,9 @@ class RuleMatcher:
                     f"  Notification: {notification.debug_info}"
                 ) from e
 
-            # If no subject_expression, stage 1 match is sufficient
-            if not rule.subject_expression:
+            if result:
                 matched_rule = rule
                 break
-
-            # Stage 2: Fetch subject and evaluate subject_expression
-            if subject_fetcher is None:
-                logger.warning(
-                    "Rule %r has subject_expression but no subject_fetcher provided",
-                    rule.id,
-                )
-                skipped.append(rule.id)
-                continue
-
-            try:
-                subject = subject_fetcher(
-                    notification.subject.url or "",
-                    notification.subject.type,
-                    notification.updated_at,
-                )
-            except NotImplementedError as e:
-                raise RuntimeError(
-                    f"Rule {rule.id!r} subject_expression cannot be evaluated:\n"
-                    f"  Subject type {notification.subject.type!r} is not supported.\n"
-                    f"  Notification: {notification.debug_info}"
-                ) from e
-            except Exception as e:
-                raise RuntimeError(
-                    f"Failed to fetch subject for rule {rule.id!r}:\n"
-                    f"  Error: {e}\n"
-                    f"  Notification: {notification.debug_info}"
-                ) from e
-
-            combined_context = templating.build_context(
-                notification, subject, self._account, self._variables
-            )
-
-            # Evaluate subject_expression
-            try:
-                subject_result = templating.evaluate(
-                    rule.subject_expression, combined_context
-                )
-            except jinja2.TemplateError as e:
-                raise RuntimeError(
-                    f"Jinja expression error for rule {rule.id!r} subject_expression on notification {notification.id}:\n"
-                    f"  Error: {e}\n"
-                    f"  Expression: {rule.subject_expression}\n"
-                    f"  Subject type: {notification.subject.type}\n"
-                    f"  Notification: {notification.debug_info}"
-                ) from e
-            except Exception as e:
-                raise RuntimeError(
-                    f"Unexpected error evaluating rule {rule.id!r} subject_expression on notification {notification.id}:\n"
-                    f"  Error: {e}\n"
-                    f"  Expression: {rule.subject_expression}\n"
-                    f"  Subject type: {notification.subject.type}\n"
-                    f"  Notification: {notification.debug_info}"
-                ) from e
-
-            if subject_result:
-                matched_rule = rule
-                break  # Both stages matched!
             skipped.append(rule.id)
 
         if skipped:

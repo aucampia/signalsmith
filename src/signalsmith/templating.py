@@ -7,10 +7,12 @@ Two distinct uses share one engine and one context builder here:
   templates, rendered with `render()`/`render_notice()`/`render_notify()`.
   A `notify` override may reference the already-rendered
   `notice.title`/`notice.body` via `notice` in scope.
-- `Rule.expression`/`Rule.subject_expression` (`config.models.Rule`),
-  evaluated by `rules.RuleMatcher` via `compile_expression()`/`evaluate()`
-  below - a boolean expression, not a template, so it is compiled with
-  `Environment.compile_expression` rather than `Environment.from_string`.
+- `Rule.expression` (`config.models.Rule`), evaluated by `rules.RuleMatcher`
+  via `compile_expression()`/`evaluate()` - a boolean expression, not a
+  template, so it is compiled with `Environment.compile_expression` rather
+  than `Environment.from_string`. The `subject` name in the context is a lazy
+  proxy (`LazySubject`) that fetches on first attribute access, so a cheap
+  `notification.*` guard on the left of `and` still gates the GitHub API call.
 
 Both use `StrictUndefined`: a reference to something that isn't in scope
 raises rather than silently rendering blank, verbatim, or `None`. For
@@ -42,8 +44,149 @@ from .notifier import RenderedNotification
 
 logger = logging.getLogger(__name__)
 
+
+# Exception types for subject fetching. Defined here rather than errors.py
+# because SignalsmithError's contract is "abort the command cleanly", but
+# a subject fetch failure must degrade to FILTERED_ERROR for one notification,
+# not kill the run.
+class SubjectFetchError(Exception):
+    """Fetching the subject for a rule expression failed.
+
+    CRITICAL: Must NOT subclass AttributeError, TypeError, LookupError, or
+    jinja2.TemplateError - if it did, Jinja's Environment.getattr/getitem would
+    catch it and convert a hard fetch failure into a silent Undefined (i.e. a
+    silent no-match).
+    """
+
+    def __init__(self, message: str, subject_type: str, subject_url: str) -> None:
+        super().__init__(message)
+        self.subject_type = subject_type
+        self.subject_url = subject_url
+
+
+class SubjectUnavailableError(SubjectFetchError):
+    """The subject cannot be fetched at all (unsupported type or missing URL)."""
+
+
+class LazySubject(Mapping[str, Any]):
+    """Lazy proxy for the `subject` in a rule expression context.
+
+    Fetches the subject on first attribute/item access, memoizes the result
+    (including failures), and presents the same dict-like interface as the
+    plain subject dict that templates use. This allows a cheap
+    `notification.*` guard on the left of `and` to gate the GitHub API call
+    even when both halves live in one expression.
+
+    Jinja's `and`/`or` compile to Python `and`/`or` and short-circuit, so
+    `notification.subject.type == "PullRequest" and subject.merged` never
+    fetches for an Issue notification.
+    """
+
+    __slots__ = ("_data", "_error", "_fetch", "_notification", "_pydantic_model")
+
+    def __init__(
+        self,
+        notification: GitHubNotification,
+        fetcher: Any,  # Callable[[str, str, str], GitHubIssue | GitHubPullRequest]
+    ) -> None:
+        self._notification = notification
+        self._fetch = fetcher
+        self._data: dict[str, Any] | None = None
+        self._error: Exception | None = None
+        self._pydantic_model: GitHubIssue | GitHubPullRequest | None = None
+
+    def _materialize(self) -> dict[str, Any]:
+        """Fetch and dump the subject once, memoizing both success and failure."""
+        if self._data is not None:
+            return self._data
+        if self._error is not None:
+            raise self._error
+
+        subject_url = self._notification.subject.url
+        subject_type = self._notification.subject.type
+        updated_at = self._notification.updated_at
+
+        if subject_url is None:
+            self._error = SubjectUnavailableError(
+                "notification has no subject URL",
+                subject_type=subject_type,
+                subject_url="",
+            )
+            raise self._error
+
+        try:
+            subject = self._fetch(subject_url, subject_type, updated_at)
+        except NotImplementedError as exc:
+            self._error = SubjectUnavailableError(
+                f"subject type {subject_type!r} is not supported",
+                subject_type=subject_type,
+                subject_url=subject_url,
+            )
+            self._error.__cause__ = exc
+            raise self._error from exc
+        except Exception as exc:
+            self._error = SubjectFetchError(
+                f"failed to fetch subject: {exc}",
+                subject_type=subject_type,
+                subject_url=subject_url,
+            )
+            self._error.__cause__ = exc
+            raise self._error from exc
+
+        # Store the pydantic model and dump to the same shape build_context produces
+        self._pydantic_model = subject
+        self._data = json.loads(subject.model_dump_json())
+        return self._data
+
+    def __getattr__(self, name: str) -> Any:
+        # CRITICAL: guard underscore/dunder access to prevent copy/pickle/repr/
+        # pytest introspection from triggering a network fetch, and to prevent
+        # infinite recursion on a half-initialized instance.
+        if name.startswith("_"):
+            raise AttributeError(name)
+        data = self._materialize()
+        try:
+            return data[name]
+        except KeyError:
+            # Reproduce the exact StrictUndefined behavior for a missing field
+            # in a plain dict - byte-identical error message.
+            return ENV.undefined(obj=data, name=name)
+
+    def __getitem__(self, key: str) -> Any:
+        # Environment.getitem catches (AttributeError, TypeError, LookupError)
+        # from this and converts to Undefined. A SubjectFetchError is none of
+        # those, so it propagates.
+        return self._materialize()[key]
+
+    def __iter__(self) -> Any:
+        return iter(self._materialize())
+
+    def __len__(self) -> int:
+        return len(self._materialize())
+
+    def __repr__(self) -> str:
+        # Must NOT materialize - debuggers/log formatting must be free.
+        if self._data is not None:
+            return "<LazySubject fetched>"
+        return "<LazySubject unfetched>"
+
+    @property
+    def _model(self) -> GitHubIssue | GitHubPullRequest | None:
+        """The fetched pydantic model, or None if not yet fetched.
+
+        Underscore-prefixed so Jinja's getattr can never route a real subject
+        field to this property. Used only by tests and potential future
+        registry integration.
+        """
+        # Deliberately does not materialize - returns None if unfetched
+        return self._pydantic_model
+
+
 __all__ = [
+    "LazySubject",
     "Notice",
+    "SubjectFetchError",
+    "SubjectUnavailableError",
     "build_context",
     "compile_expression",
     "evaluate",
@@ -66,6 +209,17 @@ ENV = jinja2.Environment(
 # tests, for each prefix in the list, whether `full_name` starts with it.
 ENV.tests["startingwith"] = lambda prefix, string: string.startswith(prefix)
 
+
+# Allow `subject|tojson` to work with the LazySubject proxy - without this,
+# json.dumps raises "Object of type LazySubject is not JSON serializable".
+def _json_default(o: Any) -> Any:
+    if isinstance(o, Mapping):
+        return dict(o)
+    raise TypeError(f"Object of type {type(o).__name__} is not JSON serializable")
+
+
+ENV.policies["json.dumps_kwargs"] = {"sort_keys": True, "default": _json_default}
+
 _TEMPLATE_CACHE: dict[str, jinja2.Template] = {}
 _EXPRESSION_CACHE: dict[str, jinja2.environment.TemplateExpression] = {}
 
@@ -83,12 +237,12 @@ def compile_expression(source: str) -> jinja2.environment.TemplateExpression:
     """Compile a boolean/value expression (not a `{{ }}` template) once per process.
 
     Unlike `_compile`, this is for bare expressions like
-    `notification.subject.type == "PullRequest"` - `Rule.expression`,
-    `Rule.subject_expression`, and the test-file `{{ ... }}` whole-string
-    form (`config.testing`). `undefined_to_none=False` is deliberate: the
-    default would turn a missing attribute into `None` instead of raising,
-    which would make a typo silently evaluate to a falsy no-match rather
-    than surfacing as an error.
+    `notification.subject.type == "PullRequest" and subject.merged` -
+    `Rule.expression` and the test-file `{{ ... }}` whole-string form
+    (`config.testing`). `undefined_to_none=False` is deliberate: the default
+    would turn a missing attribute into `None` instead of raising, which would
+    make a typo silently evaluate to a falsy no-match rather than surfacing as
+    an error.
 
     Raises `jinja2.TemplateSyntaxError` on a syntax error.
     """
@@ -102,8 +256,10 @@ def compile_expression(source: str) -> jinja2.environment.TemplateExpression:
 def evaluate(source: str, context: Mapping[str, Any]) -> Any:
     """Evaluate `source` as an expression against `context` and return the result.
 
-    Raises `jinja2.TemplateSyntaxError` on a syntax error and
-    `jinja2.UndefinedError` on a reference to something not in `context`.
+    Raises `jinja2.TemplateSyntaxError` on a syntax error,
+    `jinja2.UndefinedError` on a reference to something not in `context`, and
+    `SubjectFetchError` if the expression touches `subject` (via a
+    `LazySubject` proxy) and fetching fails.
 
     A bare undefined reference (e.g. `subject.merged` with no further
     operation on it) does *not* itself raise - `StrictUndefined` only raises
@@ -208,13 +364,13 @@ def build_context(
 ) -> dict[str, Any]:
     """Build the Jinja context shared by rule expressions and templates.
 
-    `rules.RuleMatcher` uses this directly to evaluate `Rule.expression`/
-    `Rule.subject_expression`, so a path that works in a rule expression
-    works in a `notice`/`notify` template too - both see the same
-    `notification`/`subject`/`account`/`variables`. Two properties aren't
-    part of the JSON dump - `GitHubSubject.web_url` and
-    `GitHubRepository.org` are plain `@property`s (`github/models.py`) - and
-    are injected here.
+    `rules.RuleMatcher` uses this to build the base context for `Rule.expression`
+    evaluation, then overwrites `context["subject"]` with a `LazySubject` proxy.
+    Templates (`notice`/`notify`) use this directly with a real subject (or None),
+    so both paths see the same `notification`/`account`/`variables` shape. Two
+    properties aren't part of the JSON dump - `GitHubSubject.web_url` and
+    `GitHubRepository.org` are plain `@property`s (`github/models.py`) - and are
+    injected here.
     """
     notification_dict = GITHUB_NOTIFICATION_ADAPTER.dump_python(
         notification, mode="json"

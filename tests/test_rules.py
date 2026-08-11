@@ -1,3 +1,5 @@
+import pytest
+
 from signalsmith.config.models import (
     MarkAsReadActionConfig,
     NotifyActionConfig,
@@ -113,12 +115,11 @@ def test_rule_matcher_first_match_wins() -> None:
 
 
 def test_two_stage_filtering_with_subject_match() -> None:
-    """Test that subject_expression is evaluated after expression matches."""
+    """Test that expression with subject access matches."""
     rules = [
         Rule(
             id="pr_assigned_to_me",
-            expression='notification.subject.type == "PullRequest"',
-            subject_expression='"testuser" in subject.assignees|map(attribute="login")',
+            expression='notification.subject.type == "PullRequest" and ("testuser" in subject.assignees|map(attribute="login"))',
             action=RuleAction(
                 notify=NotifyActionConfig(title="PR Assigned", body="You were assigned")
             ),
@@ -166,12 +167,11 @@ def test_two_stage_filtering_with_subject_match() -> None:
 
 
 def test_two_stage_filtering_subject_no_match() -> None:
-    """Test that rule doesn't match if subject_expression fails."""
+    """Test that rule doesn't match if subject check fails."""
     rules = [
         Rule(
             id="pr_assigned_to_me",
-            expression='notification.subject.type == "PullRequest"',
-            subject_expression='"testuser" in subject.assignees|map(attribute="login")',
+            expression='notification.subject.type == "PullRequest" and ("testuser" in subject.assignees|map(attribute="login"))',
             action=RuleAction(
                 notify=NotifyActionConfig(title="PR Assigned", body="You were assigned")
             ),
@@ -245,12 +245,11 @@ def test_context_variable_available_in_expression() -> None:
 
 
 def test_context_variable_available_in_subject_expression() -> None:
-    """Extra context must also be usable in `subject_expression`, alongside `subject`."""
+    """Account context must be usable in expressions with subject access."""
     rules = [
         Rule(
             id="pr_assigned_to_account",
-            expression='notification.subject.type == "PullRequest"',
-            subject_expression="account.github.username in subject.assignees|map(attribute='login')",
+            expression="notification.subject.type == \"PullRequest\" and (account.github.username in subject.assignees|map(attribute='login'))",
             action=RuleAction(
                 notify=NotifyActionConfig(title="PR Assigned", body="You were assigned")
             ),
@@ -296,13 +295,12 @@ def test_context_variable_available_in_subject_expression() -> None:
     assert matched.id == "pr_assigned_to_account"
 
 
-def test_subject_expression_not_evaluated_if_expression_fails() -> None:
-    """Test that subject is not fetched if stage 1 fails."""
+def test_subject_not_fetched_when_cheap_guard_fails() -> None:
+    """Test that subject is not fetched when cheap guard short-circuits."""
     rules = [
         Rule(
             id="pr_only",
-            expression='notification.subject.type == "PullRequest"',
-            subject_expression='"testuser" in subject.assignees|map(attribute="login")',
+            expression='notification.subject.type == "PullRequest" and ("testuser" in subject.assignees|map(attribute="login"))',
             action=RuleAction(
                 notify=NotifyActionConfig(title="PR", body="PR notification")
             ),
@@ -374,3 +372,184 @@ def test_rule_matcher_reaches_repository_org_and_subject_web_url() -> None:
     matched = matcher.find_matching_rule(notification)
     assert matched is not None
     assert matched.id == "org_and_url"
+
+
+def test_subject_fetched_once_across_rules() -> None:
+    """Multiple subject-touching rules should only fetch the subject once."""
+    rules = [
+        Rule(
+            id="rule1",
+            expression='notification.subject.type == "PullRequest" and subject.state == "open"',
+            action=RuleAction(notify=NotifyActionConfig(title="R1", body="R1")),
+        ),
+        Rule(
+            id="rule2",
+            expression='notification.subject.type == "PullRequest" and subject.draft',
+            action=RuleAction(mark_as_read=MarkAsReadActionConfig()),
+        ),
+        Rule(
+            id="rule3",
+            expression='notification.subject.type == "PullRequest" and subject.merged',
+            action=RuleAction(mark_as_read=MarkAsReadActionConfig()),
+        ),
+    ]
+    matcher = RuleMatcher(rules, account={}, variables={})
+
+    notification = GitHubNotification(
+        id="1",
+        reason="mention",
+        unread=True,
+        updated_at="2026-06-17T00:00:00Z",
+        subject=GitHubSubject(
+            title="Test PR",
+            type="PullRequest",
+            url="https://api.github.com/repos/owner/repo/pulls/1",
+        ),
+        repository=GitHubRepository(id=1, name="repo", full_name="owner/repo"),
+        url="https://api.github.com/notifications/threads/1",
+        subscription_url="https://api.github.com/notifications/threads/1/subscription",
+    )
+
+    fetch_count = 0
+
+    def fetch_subject(
+        url: str, type: str, updated_at: str
+    ) -> GitHubIssue | GitHubPullRequest:
+        nonlocal fetch_count
+        fetch_count += 1
+        return GitHubPullRequest(
+            id=1,
+            number=1,
+            title="Test PR",
+            state="open",
+            user=GitHubUser(login="someone", id=1, type="User"),
+            created_at="2026-06-17T00:00:00Z",
+            updated_at="2026-06-17T00:00:00Z",
+        )
+
+    matched = matcher.find_matching_rule(notification, fetch_subject)
+    assert matched is not None
+    assert matched.id == "rule1"
+    assert fetch_count == 1
+
+
+@pytest.mark.parametrize(
+    "exception_type",
+    [NotImplementedError, RuntimeError],
+    ids=["NotImplementedError", "RuntimeError"],
+)
+def test_subject_fetch_failure_raises_runtime_error(
+    exception_type: type[Exception],
+) -> None:
+    """Subject fetch failures should raise RuntimeError with rule/notification context."""
+    rules = [
+        Rule(
+            id="failing_rule",
+            expression='notification.subject.type == "PullRequest" and subject.merged',
+            action=RuleAction(mark_as_read=MarkAsReadActionConfig()),
+        ),
+    ]
+    matcher = RuleMatcher(rules, account={}, variables={})
+
+    notification = GitHubNotification(
+        id="fail123",
+        reason="mention",
+        unread=True,
+        updated_at="2026-06-17T00:00:00Z",
+        subject=GitHubSubject(
+            title="Test PR",
+            type="PullRequest",
+            url="https://api.github.com/repos/owner/repo/pulls/1",
+        ),
+        repository=GitHubRepository(id=1, name="repo", full_name="owner/repo"),
+        url="https://api.github.com/notifications/threads/fail123",
+        subscription_url="https://api.github.com/notifications/threads/fail123/subscription",
+    )
+
+    def fetch_subject(
+        url: str, type: str, updated_at: str
+    ) -> GitHubIssue | GitHubPullRequest:
+        raise exception_type("Fetch failed")
+
+    with pytest.raises(RuntimeError) as exc_info:
+        matcher.find_matching_rule(notification, fetch_subject)
+    assert "failing_rule" in str(exc_info.value)
+    assert "fail123" in str(exc_info.value)
+    assert "notification.subject.type" in str(exc_info.value)
+
+
+def test_expression_touching_subject_without_fetcher_raises() -> None:
+    """Expression referencing subject without a fetcher should raise RuntimeError."""
+    rules = [
+        Rule(
+            id="needs_subject",
+            expression='notification.subject.type == "Issue" and subject.state == "open"',
+            action=RuleAction(notify=NotifyActionConfig(title="T", body="B")),
+        ),
+    ]
+    matcher = RuleMatcher(rules, account={}, variables={})
+
+    notification = GitHubNotification(
+        id="no_fetcher",
+        reason="mention",
+        unread=True,
+        updated_at="2026-06-17T00:00:00Z",
+        subject=GitHubSubject(
+            title="Test Issue",
+            type="Issue",
+            url="https://api.github.com/repos/owner/repo/issues/1",
+        ),
+        repository=GitHubRepository(id=1, name="repo", full_name="owner/repo"),
+        url="https://api.github.com/notifications/threads/no_fetcher",
+        subscription_url="https://api.github.com/notifications/threads/no_fetcher/subscription",
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        matcher.find_matching_rule(notification, subject_fetcher=None)
+    assert "needs_subject" in str(exc_info.value)
+    assert "no subject fetcher was provided" in str(exc_info.value)
+
+
+def test_missing_subject_field_raises_rather_than_no_match() -> None:
+    """Accessing a missing subject field should raise, not silently fail to match."""
+    rules = [
+        Rule(
+            id="merged_check",
+            expression='notification.subject.type == "Issue" and subject.merged',
+            action=RuleAction(mark_as_read=MarkAsReadActionConfig()),
+        ),
+    ]
+    matcher = RuleMatcher(rules, account={}, variables={})
+
+    notification = GitHubNotification(
+        id="missing_field",
+        reason="mention",
+        unread=True,
+        updated_at="2026-06-17T00:00:00Z",
+        subject=GitHubSubject(
+            title="Test Issue",
+            type="Issue",
+            url="https://api.github.com/repos/owner/repo/issues/1",
+        ),
+        repository=GitHubRepository(id=1, name="repo", full_name="owner/repo"),
+        url="https://api.github.com/notifications/threads/missing_field",
+        subscription_url="https://api.github.com/notifications/threads/missing_field/subscription",
+    )
+
+    def fetch_subject(
+        url: str, type: str, updated_at: str
+    ) -> GitHubIssue | GitHubPullRequest:
+        return GitHubIssue(
+            id=1,
+            number=1,
+            title="Test Issue",
+            state="open",
+            user=GitHubUser(login="someone", id=1, type="User"),
+            created_at="2026-06-17T00:00:00Z",
+            updated_at="2026-06-17T00:00:00Z",
+        )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        matcher.find_matching_rule(notification, fetch_subject)
+    assert "merged_check" in str(exc_info.value)
+    assert "Jinja expression error" in str(exc_info.value)

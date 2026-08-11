@@ -308,8 +308,7 @@ def test_process_notifications_account_username_from_provider(
         rules=[
             Rule(
                 id="assigned_to_me",
-                expression='notification.subject.type == "Issue"',
-                subject_expression="account.github.username in subject.assignees|map(attribute='login')",
+                expression="notification.subject.type == \"Issue\" and (account.github.username in subject.assignees|map(attribute='login'))",
                 action=RuleAction(mark_as_read=MarkAsReadActionConfig()),
             )
         ]
@@ -497,8 +496,8 @@ def test_permanently_ignored_subject_is_skipped_before_rule_matching(
     ignore_store: IgnoreStore,
 ) -> None:
     """A subject in the permanent-ignore store is skipped regardless of rules,
-    and never triggers a subject fetch - even for a rule with a
-    subject_expression that would otherwise match."""
+    and never triggers a subject fetch - even for a rule expression that
+    touches subject and would otherwise match."""
     assert sample_notification.subject.url is not None
     ignore_store.add(sample_notification.subject.url, sample_notification)
 
@@ -506,8 +505,7 @@ def test_permanently_ignored_subject_is_skipped_before_rule_matching(
         rules=[
             Rule(
                 id="would_match",
-                expression="true",
-                subject_expression="true",
+                expression="true and (subject.state == 'open' or true)",
                 action=RuleAction(mark_as_read=MarkAsReadActionConfig()),
             )
         ]
@@ -595,7 +593,7 @@ def test_process_notifications_notice_template_fetches_subject_on_demand(
     ignore_store: IgnoreStore,
 ) -> None:
     """A `notice` template referencing `subject` triggers an on-demand fetch
-    even though the matched rule has no `subject_expression` of its own."""
+    even though the matched rule expression doesn't touch subject."""
     config = Config(
         notice=NoticeConfig(body="Opened by {{ subject.user.login }}"),
         rules=[

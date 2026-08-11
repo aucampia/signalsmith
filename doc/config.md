@@ -16,7 +16,7 @@ resolves independently via `SIGNALSMITH_TEST_DIR`/`SIGNALSMITH_CONFIG_DIR`.
 
 ```yaml
 # Config file schema version (see Versioning below). Required.
-version: '3.0'
+version: '4.0'
 
 # Seconds between re-notifications for persistent unread items (default: 3600)
 renotify_interval: 3600
@@ -62,8 +62,9 @@ rules:
         body: 'You were mentioned in: {{ notification.subject.title }}'
 
   - id: 'issue_assigned_to_me'
-    expression: 'notification.subject.type == "Issue"'
-    subject_expression: "account.github.username in subject.assignees|map(attribute='login')"
+    expression: >
+      notification.subject.type == "Issue"
+      and (account.github.username in subject.assignees|map(attribute='login'))
     action:
       ref: notify_default
 
@@ -100,8 +101,8 @@ rules:
 
 ## Rule Expressions Are Jinja
 
-`expression` and `subject_expression` are bare [Jinja](https://jinja.palletsprojects.com/)
-expressions (not `{{ }}`-wrapped templates) — the same engine `notice`/`notify`
+`expression` is a bare [Jinja](https://jinja.palletsprojects.com/)
+expression (not `{{ }}`-wrapped template) — the same engine `notice`/`notify`
 templates use, evaluated to a real Python value rather than rendered to text.
 `&&`/`||`/`!` become `and`/`or`/`not`; equality/comparison/`in` are unchanged.
 
@@ -113,6 +114,12 @@ matching — same as a syntax error. Guard explicitly:
 - `subject.requested_reviewers|default([])` — supply a fallback value when a
   field may be entirely absent from the fetched subject.
 - `subject.foo is defined` — check presence without supplying a fallback.
+- **`subject is defined` is always true** in a rule expression and is not a
+  usable guard (the name is always bound to the lazy proxy, even before a
+  fetch). Use `notification.subject.type in ("Issue", "PullRequest")` to
+  filter for fetchable types. Similarly, `subject|default({})` never
+  substitutes. Field-level checks like `subject.foo is defined` and
+  `subject.foo|default(...)` work as expected.
 - **Nested access**: `variables.ontopic.prefixes|default([])` does **not** protect against a missing `variables.ontopic` — the `|default` filter only guards the final hop. Once `variables.ontopic` is `Undefined`, accessing `.prefixes` raises before the filter runs. Use `.get()` chaining for nested lookups:
   ```yaml
   variables.get('ontopic', {}).get('prefixes', [])
@@ -140,49 +147,61 @@ Plain Python string methods also work directly (e.g.
 `startingwith` when checking against a single literal prefix rather than a
 list.
 
-## Two-Stage Rule Evaluation
+## Lazy Subject Access
 
-Rules support an optional second evaluation stage for fields that require an extra API call:
+Rule expressions have access to both `notification` (the GitHub API notification
+object, always available, no extra API call) and `subject` (the full
+Issue/PullRequest, fetched on first attribute access). `subject` is lazy: it
+only fetches if the expression actually touches it, so a cheap
+`notification.*` test on the left of `and` still gates the expensive API call.
 
-1. **`expression`** (required) — evaluated against a `notification` object mirroring the GitHub API response (fields: `id`, `reason`, `unread`, `updated_at`, `subject.title`, `subject.type`, `repository.name`, `repository.full_name`). Cheap — no extra API calls.
-2. **`subject_expression`** (optional) — evaluated only if `expression` matched. Fetches the full Issue/PullRequest object (cached under `${XDG_CACHE_HOME}/signalsmith/subjects/`, see [Caching](#caching)) and exposes it as `subject`, alongside `notification` still in scope. Both stages must pass for the rule to match.
+**Order matters.** Jinja's `and`/`or` short-circuit like Python's, so the
+left-hand side is evaluated first. Put cheap `notification.*` checks first:
+
+**Good** (fetches subject only for PRs):
+```yaml
+expression: >
+  notification.subject.type == "PullRequest"
+  and (subject.merged or subject.state == "closed")
+```
+
+**Bad** (fetches subject for everything, then filters to PRs):
+```yaml
+expression: >
+  (subject.merged or subject.state == "closed")
+  and notification.subject.type == "PullRequest"
+```
+
+**Wrap the subject-touching half in parens** when merging `and`-joined
+conditions, or `a and b or c` will reassociate incorrectly.
 
 Subject fields (see `src/signalsmith/github/models.py` for the full model):
 
 - Common to Issues and PRs: `subject.state`, `subject.user.login`, `subject.assignees[]`, `subject.labels[]` (each with `.name`, `.color`)
 - PR-specific: `subject.draft`, `subject.merged`, `subject.mergeable_state`, `subject.requested_reviewers[]`, `subject.requested_teams[]` (each with `.slug`, `.name`)
 
+Subjects are cached under `${XDG_CACHE_HOME}/signalsmith/subjects/` (see [Caching](#caching)).
+
 ## Account Variables
 
-Both `expression` and `subject_expression` also have an `account` object in scope, sourced from the GitHub API rather than hardcoded in config:
+Rule expressions also have an `account` object in scope, sourced from the
+GitHub API rather than hardcoded in config:
 
 - `account.github.username` — the authenticated user's GitHub login (from `GET /user`, cached indefinitely under `${XDG_CACHE_HOME}/signalsmith/user.json` since it never changes)
 
 Example — match assignees/reviewers without hardcoding a username:
 
 ```yaml
-subject_expression: >
-  account.github.username in
-  (subject.assignees + subject.requested_reviewers|default([]))|map(attribute='login')
-```
-
-`requested_reviewers` isn't present on every subject type, hence
-`|default([])` — see [Rule Expressions Are Jinja](#rule-expressions-are-jinja)
-below for why a plain `is defined` guard doesn't work the same way here.
-
-Example — only match PRs I'm not a direct reviewer/assignee on:
-
-```yaml
-- id: closed_pr_mark_as_read
-  expression: 'notification.subject.type == "PullRequest"'
-  subject_expression: 'subject.merged or subject.state == "closed"'
-  action:
-    mark_as_read: {}
-```
+expression: >
+  notification.subject.type in ["Issue", "PullRequest"]
+  and (
+    account.github.username in
+    (subject.assignees + subject.requested_reviewers|default([]))|map(attribute='login')
+  )
 
 ## Variables
 
-A top-level `variables:` block defines arbitrary data (lists, nested maps, whatever) that's exposed as a `variables` object in both `expression` and `subject_expression`. This lets you write generic rules once and keep the specific values (repo lists, bot names, team names) in one place instead of duplicating them across expressions.
+A top-level `variables:` block defines arbitrary data (lists, nested maps, whatever) that's exposed as a `variables` object in rule expressions. This lets you write generic rules once and keep the specific values (repo lists, bot names, team names) in one place instead of duplicating them across expressions.
 
 ```yaml
 variables:
@@ -205,8 +224,9 @@ rules:
       mark_as_read: {}
 
   - id: bot_pr_mark_as_read
-    expression: 'notification.subject.type == "PullRequest"'
-    subject_expression: 'subject.user.login in variables.spam_bots'
+    expression: >
+      notification.subject.type == "PullRequest"
+      and (subject.user.login in variables.spam_bots)
     action:
       mark_as_read: {}
 ```
@@ -266,16 +286,16 @@ Templates are [Jinja](https://jinja.palletsprojects.com/) - `{{ ... }}` for
 values, `{% if %}`/`{% for %}` etc. for logic. Available names depend on which
 template you're writing:
 
-- **`notice.title`/`notice.body`**: `notification`, `subject` (only if some
-  rule's `subject_expression` already fetched one, or a template here
-  references `subject` and it's fetchable - see below), `account`, `variables`
-  - the exact same objects `expression`/`subject_expression` see (above).
+- **`notice.title`/`notice.body`**: `notification`, `subject` (only if a rule
+  expression already touched it, or a template here references `subject` and
+  it's fetchable - see below), `account`, `variables` - the exact same objects
+  rule expressions see (above).
 - **`notify.title`/`notify.body`**: all of the above, **plus `notice`**
   (`notice.title`, `notice.body`) - the already-rendered generic notice.
 
 **On-demand subject fetch**: if a `notice`/`notify` template references
-`subject` and no rule already fetched one while matching, signalsmith fetches
-it before rendering (same cache as `subject_expression`). A config whose
+`subject` and no rule expression already touched it while matching, signalsmith
+fetches it before rendering (same cache as rule expressions). A config whose
 templates never mention `subject` never pays for that extra fetch.
 
 **Failure handling**: a template that fails to render (an undefined
@@ -315,7 +335,7 @@ If none of these are available, the tool will exit with an error suggesting to r
 
 - **Version marker**: `${XDG_CACHE_HOME}/signalsmith/version.json` — see [Versioning](#versioning). Written automatically on first use; not user-editable.
 - **Notification list**: `${XDG_CACHE_HOME}/signalsmith/notifications.json`. The GitHub API is queried with `If-Modified-Since` / `ETag` conditional requests; a `304 Not Modified` response reuses cached data without counting against quota. Passing `--cache-only` forces use of this file, making **zero** API calls for the notification list. Only written on unlimited (no `--limit`) fetches, so its ETag/Last-Modified metadata always corresponds to the full feed.
-- **Subjects** (Issues/PRs fetched for `subject_expression` evaluation): `${XDG_CACHE_HOME}/signalsmith/subjects/api.github.com/repos/<owner>/<repo>/<issues|pulls>/<number>.json`. Considered fresh as long as the notification's `updated_at` hasn't advanced past the cache file's mtime; refetched otherwise.
+- **Subjects** (Issues/PRs fetched for rule expressions): `${XDG_CACHE_HOME}/signalsmith/subjects/api.github.com/repos/<owner>/<repo>/<issues|pulls>/<number>.json`. Considered fresh as long as the notification's `updated_at` hasn't advanced past the cache file's mtime; refetched otherwise.
 - **Notification archive**: `${XDG_CACHE_HOME}/signalsmith/notifications-archive-<YYYYMMDDTHHZ>.jsonl` (one file per UTC hour) — every fetch result (regardless of `--limit`, `--cache-only`, or `--refresh-notifications`) is appended here, one JSON line per notification: `{"fetched_at": "<ISO-8601>", "notification": {...}}`. Written unconditionally and never read back by signalsmith. Each hourly file grows without bound within that hour (not deduplicated) — useful for inspecting real notification payloads while writing rule expressions, and for later analysis of what signalsmith has seen over time (e.g. with `jq`).
 
 ## Spool
@@ -323,7 +343,7 @@ If none of these are available, the tool will exit with an error suggesting to r
 Every notification that results in a `notify` action is written to a durable spool entry:
 
 - **Version marker**: `${XDG_DATA_HOME}/signalsmith/version.json` — see [Versioning](#versioning). Lives at the state root above the spool itself (not inside `spool.dir`, even if that's overridden), so it also covers any future state store added alongside the spool. Written automatically on first use; not user-editable.
-- **Live spool**: `${XDG_DATA_HOME}/signalsmith/spool/<provider>-<notification-id>.json` (e.g. `github-14523452.json`) — one JSON file per notified notification, containing the full notification, the fetched subject (if a rule's `subject_expression` fetched one; `null` otherwise), the matched rule (as a plain JSON snapshot, not tied to the current config schema), the rendered title/body, `received_at`/`last_notified_at`/`notify_count`, and a capped history of recent notify events. This also drives `renotify_interval`: the entry's `last_notified_at` replaces what used to be tracked in a separate `state.json`, so there's nothing else to keep in sync.
+- **Live spool**: `${XDG_DATA_HOME}/signalsmith/spool/<provider>-<notification-id>.json` (e.g. `github-14523452.json`) — one JSON file per notified notification, containing the full notification, the fetched subject (if a rule expression touched it; `null` otherwise), the matched rule (as a plain JSON snapshot, not tied to the current config schema), the rendered title/body, `received_at`/`last_notified_at`/`notify_count`, and a capped history of recent notify events. This also drives `renotify_interval`: the entry's `last_notified_at` replaces what used to be tracked in a separate `state.json`, so there's nothing else to keep in sync.
 - Kept until the notification disappears from the provider's unread feed, at which point it's moved (not deleted) to the trash below. A notification `run`/`daemon` marks as read itself is *not* removed immediately — it lingers until the next full fetch confirms it's actually gone upstream.
 - Configurable location: `spool.dir` (default shown above).
 - Inspect with `signalsmith spool list`; reset with `signalsmith spool clean` (see [CLI Reference](./cli.md)).
@@ -356,3 +376,32 @@ What happens on an incompatible version differs by kind:
 - **State/cache directories**: signalsmith tells you to run `signalsmith state clean` / `signalsmith cache clean` and re-run; it does not clear them automatically. A newer-minor state directory additionally warns that writing to it may lose data added by the newer version (not a concern for the disposable cache).
 
 A fresh (missing or empty) state/cache directory silently gets today's version marker written to it — no warning on first run.
+
+### What changed from 3.0
+
+Version 4.0 eliminates the `subject_expression` field. Rules now have a single
+`expression` that can reference both `notification` and `subject`. The subject
+is fetched lazily on first attribute access, so the cost guard remains: put
+cheap `notification.*` checks leftmost in an `and` chain.
+
+**Migration**: For each rule with both fields, combine them into a single
+`expression`:
+
+```yaml
+# Before (3.0):
+expression: 'notification.subject.type == "PullRequest"'
+subject_expression: 'subject.merged or subject.state == "closed"'
+
+# After (4.0):
+expression: >
+  notification.subject.type == "PullRequest"
+  and (subject.merged or subject.state == "closed")
+```
+
+**Wrap the subject half in parens** — `a and b or c` reassociates incorrectly
+without them.
+
+**Unknown config keys are now hard errors.** If you bump `version: '4.0'` but
+forget to delete `subject_expression:`, the config will fail to load with
+`unexpected_keyword_argument` naming the stray field, rather than silently
+ignoring it (which would widen the rule to match on the cheap half alone).

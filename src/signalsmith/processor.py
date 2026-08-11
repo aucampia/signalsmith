@@ -170,23 +170,30 @@ def create_actions(
             ).decode()
             print(f"Notification JSON for {notification.id}:\n{notification_json}")
 
-        # Create subject fetcher callback
-        creator_recorded = False
+        # Create subject fetcher callback with memoization
         fetched_subject: GitHubIssue | GitHubPullRequest | None = None
+        fetch_error: Exception | None = None
 
         def fetch_subject(
             url: str, type: str, updated_at: str
         ) -> GitHubIssue | GitHubPullRequest:
-            nonlocal creator_recorded, fetched_subject
-            subject = provider.get_subject(url, type, updated_at)
-            fetched_subject = subject
+            nonlocal fetched_subject, fetch_error
+            if fetched_subject is not None:
+                return fetched_subject
+            if fetch_error is not None:
+                raise fetch_error
+            try:
+                subject = provider.get_subject(url, type, updated_at)
+            except Exception as exc:
+                fetch_error = exc
+                raise
             if dump_json:
                 print(
                     f"Fetched subject JSON for {type} at {url}:\n{subject.model_dump_json(indent=2)}"
                 )
-            if stats is not None and not creator_recorded:
+            if stats is not None:
                 stats.by_creator[subject.user.login] += 1
-                creator_recorded = True
+            fetched_subject = subject
             return subject
 
         logger.info("Received notification %s", notification.debug_info)
