@@ -15,7 +15,7 @@ cases:
         requested_teams:
           - id: 1
             name: Team
-            slug: '{{ parameter.id }}'
+            slug: '{{ parameter.slug }}'
     expect:
       rule: spam_team_mark_as_read
       action: mark_as_read
