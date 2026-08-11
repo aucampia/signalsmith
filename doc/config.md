@@ -113,6 +113,11 @@ matching — same as a syntax error. Guard explicitly:
 - `subject.requested_reviewers|default([])` — supply a fallback value when a
   field may be entirely absent from the fetched subject.
 - `subject.foo is defined` — check presence without supplying a fallback.
+- **Nested access**: `variables.ontopic.prefixes|default([])` does **not** protect against a missing `variables.ontopic` — the `|default` filter only guards the final hop. Once `variables.ontopic` is `Undefined`, accessing `.prefixes` raises before the filter runs. Use `.get()` chaining for nested lookups:
+  ```yaml
+  variables.get('ontopic', {}).get('prefixes', [])
+  ```
+  This is safe for `variables` (a plain `dict`) and prevents errors when variable blocks are removed from the config.
 
 **No `exists`/`all`/`has`/`size()` macros.** Use Jinja's built-in filters
 instead — `select`/`selectattr`/`rejectattr`/`map`/`in`/`length`. Two idioms
@@ -126,8 +131,8 @@ test, `startingwith`, usable with `select`/`selectattr`:
 
 ```yaml
 expression: >
-  variables.offtopic.prefixes|select('startingwith', notification.repository.full_name)|first is defined
-  or notification.repository.full_name in variables.offtopic.repos
+  variables.get('offtopic', {}).get('prefixes', [])|select('startingwith', notification.repository.full_name)|first is defined
+  or notification.repository.full_name in variables.get('offtopic', {}).get('repos', [])
 ```
 
 Plain Python string methods also work directly (e.g.
@@ -194,8 +199,8 @@ variables:
 rules:
   - id: off_topic_mark_as_read
     expression: >
-      variables.offtopic.prefixes|select('startingwith', notification.repository.full_name)|first is defined
-      or notification.repository.full_name in variables.offtopic.repos
+      variables.get('offtopic', {}).get('prefixes', [])|select('startingwith', notification.repository.full_name)|first is defined
+      or notification.repository.full_name in variables.get('offtopic', {}).get('repos', [])
     action:
       mark_as_read: {}
 

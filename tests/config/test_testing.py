@@ -132,14 +132,14 @@ def _config_with_variables(variables: dict[str, object]) -> Config:
 def test_resolve_parameters(
     variables: dict[str, Any], parameters: list[Any] | str | None, expected: list[Any]
 ) -> None:
-    config = _config_with_variables(variables)
-    assert resolve_parameters(parameters, config) == expected
+    scope = {"variables": variables}
+    assert resolve_parameters(parameters, scope) == expected
 
 
 def test_resolve_parameters_non_list_template_raises() -> None:
-    config = _config_with_variables({"spam_bots": "not-a-list"})
+    scope = {"variables": {"spam_bots": "not-a-list"}}
     with pytest.raises(TemplateResolutionError):
-        resolve_parameters("{{ variables.spam_bots }}", config)
+        resolve_parameters("{{ variables.spam_bots }}", scope)
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +473,229 @@ def test_expected_result_requires_rule_key() -> None:
 def test_expected_result_rule_null_is_valid() -> None:
     expected = EXPECTED_RESULT_ADAPTER.validate_python({"rule": None})
     assert expected.rule is None
+
+
+# ---------------------------------------------------------------------------
+# variables override
+# ---------------------------------------------------------------------------
+
+
+def test_run_case_file_variables_replaces_config() -> None:
+    """File-level variables replace config; config keys don't leak through."""
+    config = _config_with_variables(
+        {"config_key": "config_value", "spam_bots": ["config-bot"]}
+    )
+    case = RuleTestCase(
+        name="test",
+        parameters="{{ variables.get('spam_bots', ['file-bot']) }}",
+        input={},
+        expect={"rule": "noop"},
+    )
+    results = run_case(
+        config, case, {}, "test.yaml", file_variables={"file_key": "file_value"}
+    )
+    assert len(results) == 1
+    # Config has spam_bots=["config-bot"], but file_variables doesn't include it,
+    # so the .get() fallback fires → parameter is "file-bot" (from ["file-bot"][0]),
+    # proving config didn't leak
+    assert results[0].parameter == "file-bot"
+
+
+def test_run_case_case_variables_replaces_file() -> None:
+    """Case-level variables replace file-level wholesale."""
+    config = _config_with_variables({"config_key": "config_value"})
+    case = RuleTestCase(
+        name="test",
+        parameters="{{ variables.get('shared_key', ['case-default']) }}",
+        input={},
+        expect={"rule": "noop"},
+        variables={"case_key": "case_value"},
+    )
+    results = run_case(
+        config,
+        case,
+        {},
+        "test.yaml",
+        file_variables={"file_key": "file_value", "shared_key": ["file-value"]},
+    )
+    assert len(results) == 1
+    # File has shared_key=["file-value"], but case variables replace wholesale,
+    # so shared_key is absent → .get() fallback fires → parameter is "case-default"
+    # (from ["case-default"][0]), proving file variables didn't leak
+    assert results[0].parameter == "case-default"
+
+
+def test_run_case_empty_variables_dict_is_distinct_from_none() -> None:
+    """variables: {} yields no variables; None uses config."""
+    config = _config_with_variables({"spam_bots": ["bot"]})
+
+    # Case with empty variables: spam_bots not present, so parameters resolves to []
+    case_empty = RuleTestCase(
+        name="empty",
+        parameters="{{ variables.get('spam_bots', ['fallback']) }}",
+        input={},
+        expect={"rule": "noop"},
+        variables={},
+    )
+    results_empty = run_case(config, case_empty, {}, "test.yaml")
+    assert len(results_empty) == 1
+    assert results_empty[
+        0
+    ].passed  # got ['fallback'] because spam_bots not in empty dict
+
+    # Case with None variables: uses config, so spam_bots is ["bot"]
+    case_none = RuleTestCase(
+        name="none",
+        parameters="{{ variables.spam_bots }}",
+        input={},
+        expect={"rule": "noop"},
+        variables=None,
+    )
+    results_none = run_case(config, case_none, {}, "test.yaml")
+    assert len(results_none) == 1
+    assert results_none[0].passed  # got ["bot"] from config
+
+
+def test_run_case_absent_variables_uses_config() -> None:
+    """Absent case.variables and file_variables uses config.variables."""
+    config = _config_with_variables({"spam_bots": ["bot"]})
+    case = RuleTestCase(
+        name="test",
+        parameters="{{ variables.spam_bots }}",
+        input={},
+        expect={"rule": "noop"},
+    )
+    results = run_case(config, case, {}, "test.yaml")
+    assert results[0].passed  # got ["bot"] from config
+
+
+def test_run_case_variables_references_config_in_scope() -> None:
+    """Variables override can reference config.variables via template resolution."""
+    # This test validates that config.variables is in scope during variables
+    # resolution. We can't pass a template string to RuleTestCase() directly
+    # (pydantic validation), so we test it via resolve_config_templates, which
+    # is what run_case uses internally.
+    from signalsmith.config.testing import resolve_config_templates
+
+    config = _config_with_variables({"spam_bots": ["bot"], "other": "value"})
+    config_scope = {"variables": config.variables}
+    raw_variables = "{{ dict(config.variables, spam_bots=['override']) }}"
+    effective = resolve_config_templates(
+        raw_variables,
+        {"config": config_scope, "account": {"github": {"username": "testuser"}}},
+    )
+    assert isinstance(effective, dict)
+    assert effective["spam_bots"] == ["override"]
+    assert effective["other"] == "value"
+
+
+def test_run_case_variables_can_reference_account() -> None:
+    """Variables templates can reference account (e.g. for user-specific overrides)."""
+    config = _config_with_variables({"default_user": "someone"})
+    case = RuleTestCase(
+        name="test",
+        input={"account": {"github": {"username": "testuser"}}},
+        parameters="{{ [variables.get('default_user')] }}",
+        expect={"rule": "noop"},
+    )
+    # Use a template string for variables that references account
+    # (must go through file to trigger template resolution)
+    results = run_case(
+        config,
+        case,
+        {},
+        "test.yaml",
+        file_variables="{{ dict(config.variables, default_user=account.github.username) }}",
+    )
+    assert len(results) == 1
+    assert results[0].parameter == "testuser"
+
+
+def test_run_test_file_with_file_level_empty_variables(tmp_path: Path) -> None:
+    """File-level variables: {} (empty dict) is distinct from absent field."""
+    config = _config_with_variables({"spam_bots": ["bot"]})
+    path = tmp_path / "test.yaml"
+    path.write_text(
+        """version: '2.1'
+variables: {}
+cases:
+  - name: empty variables from file
+    parameters: "{{ variables.get('spam_bots', ['fallback']) }}"
+    input:
+      notification:
+        subject:
+          type: Issue
+    expect:
+      rule: noop
+"""
+    )
+    results = run_test_file(config, path)
+    assert len(results) == 1
+    # File has variables: {}, so spam_bots is absent → .get() returns ['fallback']
+    assert results[0].parameter == "fallback"
+
+
+def test_run_case_variables_non_dict_raises(tmp_path: Path) -> None:
+    """variables: resolving to non-dict raises TemplateResolutionError."""
+    config = _config_with_variables({})
+    path = tmp_path / "test.yaml"
+    path.write_text(
+        """version: '2.1'
+cases:
+  - name: test
+    variables: "not-a-dict"
+    input:
+      notification:
+        subject:
+          type: Issue
+    expect:
+      rule: noop
+"""
+    )
+    results = run_test_file(config, path)
+    assert len(results) == 1
+    assert not results[0].passed
+    assert results[0].error is not None
+    assert "must resolve to a dict" in results[0].error
+
+
+def test_run_case_parameters_resolves_against_overridden_variables() -> None:
+    """parameters: template sees effective variables after override."""
+    config = _config_with_variables({"spam_bots": ["config-bot"]})
+    case = RuleTestCase(
+        name="test",
+        parameters="{{ variables.spam_bots }}",
+        input={},
+        expect={"rule": "noop"},
+        variables={"spam_bots": ["override-bot"]},
+    )
+    results = run_case(config, case, {}, "test.yaml")
+    assert len(results) == 1
+    # Config has ["config-bot"], but case overrides to ["override-bot"]
+    assert results[0].parameter == "override-bot"
+
+
+def test_run_test_file_with_version_2_1(tmp_path: Path) -> None:
+    """run_test_file round-trip with version: '2.1' and variables:."""
+    config = _config_with_variables({"spam_bots": ["bot"]})
+    path = tmp_path / "test.yaml"
+    path.write_text(
+        """version: '2.1'
+variables:
+  spam_bots: []
+cases:
+  - name: empty variables
+    input:
+      notification:
+        subject:
+          type: Issue
+    expect:
+      rule: noop
+"""
+    )
+    results = run_test_file(config, path)
+    assert len(results) == 1
+    assert results[0].passed
 
 
 # ---------------------------------------------------------------------------

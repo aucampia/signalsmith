@@ -5,7 +5,10 @@ directory) asserting that a given (partial) notification/subject matches the
 expected rule and action - without any GitHub API access. Each case's
 notification/subject/account partials live under an `input:` block, which can
 also be set at the file level as shared defaults that every case's `input:`
-deep-merges over. See doc/test-format.md for the test file schema.
+deep-merges over. A top-level `variables:` block (file-level and/or case-level)
+replaces the config's `variables:` for that test, enabling tests to simulate
+absent or modified variable blocks. See doc/test-format.md for the test file
+schema.
 """
 
 from __future__ import annotations
@@ -119,6 +122,11 @@ class RuleTestCase:
     # themselves contain `{{ parameter... }}` references, so they're only
     # template-resolved and validated per parameter, inside `run_case`.
     expect: dict[str, Any]
+    # Optional variables override. None = use file-level/config; {} = no variables.
+    # Replaces (never merges) file-level/config variables. Raw (unvalidated) -
+    # can be a dict, a template string resolving to a dict, or None. Validated
+    # and resolved per case in run_case.
+    variables: Any = None
 
 
 @pydantic_dataclass(kw_only=True)
@@ -128,6 +136,11 @@ class RuleTestFile:
     # `input.account`; each case's `input:` is deep-merged over this.
     input: dict[str, Any] = field(default_factory=dict)
     cases: list[RuleTestCase] = field(default_factory=list)
+    # Optional variables override. None = use config; {} = no variables.
+    # Replaces (never merges) config variables. Raw (unvalidated) - can be a dict,
+    # a template string resolving to a dict, or None. Validated and resolved in
+    # run_case.
+    variables: Any = None
 
 
 RULE_TEST_FILE_ADAPTER: TypeAdapter[RuleTestFile] = TypeAdapter(RuleTestFile)
@@ -206,7 +219,9 @@ def resolve_config_templates(obj: Any, scope: dict[str, Any]) -> Any:
     return obj
 
 
-def resolve_parameters(parameters: list[Any] | str | None, config: Config) -> list[Any]:
+def resolve_parameters(
+    parameters: list[Any] | str | None, scope: dict[str, Any]
+) -> list[Any]:
     """Expand a case's `parameters` into a concrete list.
 
     `None` means the case isn't parameterized and runs once. A string must be
@@ -216,7 +231,7 @@ def resolve_parameters(parameters: list[Any] | str | None, config: Config) -> li
     if parameters is None:
         return [None]
     if isinstance(parameters, str):
-        resolved = resolve_config_templates(parameters, {"variables": config.variables})
+        resolved = resolve_config_templates(parameters, scope)
         if not isinstance(resolved, list):
             raise TemplateResolutionError(
                 f"'parameters' template {parameters!r} must resolve to a list, "
@@ -276,16 +291,61 @@ def run_case(
     case: RuleTestCase,
     file_input: dict[str, Any],
     file_name: str,
+    *,
+    file_variables: Any = None,
 ) -> list[CaseResult]:
     results: list[CaseResult] = []
     merged_input = deep_merge(file_input, case.input)
-    for parameter in resolve_parameters(case.parameters, config):
-        scope: dict[str, Any] = {"variables": config.variables}
+
+    # Compute account once (doesn't depend on parameter)
+    account = deep_merge(DEFAULT_ACCOUNT, merged_input.get("account") or {})
+
+    # Resolve effective variables: case > file > config (replace, never merge).
+    # `variables:` blocks may reference `config.variables` and `account`, but NOT
+    # `parameter` (would be circular, since `parameters:` can reference `variables`).
+    config_scope = {"variables": config.variables}
+    raw_variables = case.variables if case.variables is not None else file_variables
+    try:
+        if raw_variables is None:
+            effective_variables = config.variables
+        else:
+            effective_variables = resolve_config_templates(
+                raw_variables, {"config": config_scope, "account": account}
+            )
+            if not isinstance(effective_variables, dict):
+                raise TemplateResolutionError(
+                    f"'variables' must resolve to a dict, got {type(effective_variables).__name__}: {effective_variables!r}"
+                )
+    except Exception as exc:
+        results.append(
+            CaseResult(
+                file=file_name,
+                case_name=case.name,
+                parameter=None,
+                passed=False,
+                expected_rule=None,
+                actual_rule=None,
+                expected_action=None,
+                actual_action=None,
+                error=str(exc),
+            )
+        )
+        return results
+
+    # Resolve parameters with effective variables in scope
+    parameters_scope = {
+        "variables": effective_variables,
+        "config": config_scope,
+        "account": account,
+    }
+    for parameter in resolve_parameters(case.parameters, parameters_scope):
+        scope: dict[str, Any] = {
+            "variables": effective_variables,
+            "config": config_scope,
+            "account": account,
+        }
         if parameter is not None:
             scope["parameter"] = parameter
-
-        account = deep_merge(DEFAULT_ACCOUNT, merged_input.get("account") or {})
-        scope["account"] = account
 
         # `expect.rule`/`expect.action` may themselves reference `{{ parameter... }}`
         # (e.g. one case asserting a different rule per parameter), so they're
@@ -325,7 +385,7 @@ def run_case(
             rule_matcher = RuleMatcher(
                 config.rules,
                 account=account,
-                variables=config.variables,
+                variables=effective_variables,
             )
             matched = rule_matcher.find_matching_rule(
                 notification, lambda *_args, _subject=subject: _subject
@@ -392,7 +452,15 @@ def run_test_file(config: Config, path: Path) -> list[CaseResult]:
     test_file = RULE_TEST_FILE_ADAPTER.validate_python(data)
     results: list[CaseResult] = []
     for case in test_file.cases:
-        results.extend(run_case(config, case, test_file.input, path.name))
+        results.extend(
+            run_case(
+                config,
+                case,
+                test_file.input,
+                path.name,
+                file_variables=test_file.variables,
+            )
+        )
     return results
 
 
