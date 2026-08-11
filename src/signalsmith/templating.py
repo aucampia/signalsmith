@@ -31,7 +31,6 @@ from typing import Any
 
 import jinja2
 import jinja2.meta
-from pydantic.dataclasses import dataclass
 
 from .config.models import NoticeConfig, NotifyActionConfig
 from .github.models import (
@@ -184,7 +183,6 @@ class LazySubject(Mapping[str, Any]):
 
 __all__ = [
     "LazySubject",
-    "Notice",
     "SubjectFetchError",
     "SubjectUnavailableError",
     "build_context",
@@ -309,14 +307,6 @@ def references_subject(source: str) -> bool:
         return False
 
 
-@dataclass(frozen=True, kw_only=True)
-class Notice:
-    """A rendered generic notice - the output of `notice.title`/`notice.body`."""
-
-    title: str
-    body: str
-
-
 def render(
     source: str,
     context: Mapping[str, Any],
@@ -410,7 +400,7 @@ def render_notice(
     context: Mapping[str, Any],
     *,
     expected_failure: str | None = None,
-) -> Notice:
+) -> RenderedNotification:
     """Render the top-level `notice:` block for one notification.
 
     `expected_failure`, forwarded to `render`, is set by the caller
@@ -432,12 +422,12 @@ def render_notice(
         fallback=_static_default_body(context),
         expected_failure=expected_failure,
     )
-    return Notice(title=title, body=body)
+    return RenderedNotification(title=title, body=body)
 
 
 def render_notify(
     config: NotifyActionConfig,
-    notice: Notice,
+    notice: RenderedNotification,
     context: Mapping[str, Any],
     *,
     expected_failure: str | None = None,

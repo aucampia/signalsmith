@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 __all__: list[str] = []
 
 
-@dataclass(kw_only=True)
+@dataclass(frozen=True, kw_only=True)
 class RenderedNotification:
     """A notify action's title/body after template rendering (see `templating.py`)."""
 
