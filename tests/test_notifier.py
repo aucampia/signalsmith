@@ -2,7 +2,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import signalsmith.notifier
 from signalsmith.notifier import RenderedNotification, send_notification
+
+
+@pytest.fixture(autouse=True)
+def _clear_notifier_cache() -> None:
+    signalsmith.notifier._get_notifier.cache_clear()
 
 
 def test_send_notification_calls_desktop_notifier_sync(
