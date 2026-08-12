@@ -224,7 +224,7 @@ class TestHistoryList:
         result = runner.invoke(cli, ["history", "list", "--action", "ignored"])
 
         assert result.exit_code == 0
-        self.mock_store.entries.assert_called_once_with(limit=20, action="ignored")
+        self.mock_store.entries.assert_called_with(limit=20, action="ignored")
 
     def test_limit_passed(self) -> None:
         self.mock_store.entries.return_value = []
@@ -232,7 +232,7 @@ class TestHistoryList:
         result = runner.invoke(cli, ["history", "list", "--limit", "5"])
 
         assert result.exit_code == 0
-        self.mock_store.entries.assert_called_once_with(limit=5, action=None)
+        self.mock_store.entries.assert_called_with(limit=5, action=None)
 
     def test_invalid_action(self) -> None:
         result = runner.invoke(cli, ["history", "list", "--action", "bogus"])

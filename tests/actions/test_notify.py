@@ -71,7 +71,7 @@ def test_execute_without_runtime_uses_plain_send(
     action = make_action(notification, spool, notify_runtime=None)
     action.execute(dry_run=False)
 
-    mock_send.assert_called_once()
+    mock_send.assert_called()
     rendered = mock_send.call_args.args[0]
     assert rendered.title == "Title"
     assert rendered.body == "Message"

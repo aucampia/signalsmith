@@ -116,3 +116,18 @@ unrelated to each other and to the package version in `pyproject.toml`.
   just different data), or exist to document distinct, differently-named
   scenarios, leave them as separate functions. A few similar-looking lines is
   not the same as substantially similar tests.
+- **Test behavior, not plumbing**: Don't assert on internal implementation
+  details that have no user-visible impact. Examples: hardcoded
+  `app_name` strings, internal class instantiation patterns, or constructor
+  arguments that are always the same value. If changing the implementation
+  would break the test without changing any user-visible behavior, the
+  assertion is testing plumbing.
+- **Prefer `assert_called_with` over `assert_called_once_with`** unless the
+  exact call count (once, never, N times) is itself the behavior being tested.
+  When a mock is called once simply because the test sets up a single
+  operation, the "once" is incidental — use `assert_called_with` (or plain
+  `assert_called()`). Keep `assert_called_once_with` only when the code
+  guarantees a single invocation by contract (e.g. a CLI command runs exactly
+  one cycle, or a lazy fetcher memoizes after exactly one API call). Keep
+  `assert_not_called()` when the behavior is that something must never happen
+  (e.g. dry run, cache hit, disabled feature toggle).

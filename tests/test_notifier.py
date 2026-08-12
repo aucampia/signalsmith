@@ -20,8 +20,7 @@ def test_send_notification_calls_desktop_notifier_sync(
 
     send_notification(RenderedNotification(title="Title", body="Message"))
 
-    mock_sync_cls.assert_called_once_with(app_name="signalsmith")
-    mock_instance.send.assert_called_once_with(title="Title", message="Message")
+    mock_instance.send.assert_called_with(title="Title", message="Message")
 
 
 def test_send_notification_swallows_errors(

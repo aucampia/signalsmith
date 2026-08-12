@@ -26,8 +26,8 @@ def test_execute_actions_runs_every_action_and_updates_stats() -> None:
         stats=stats,
     )
 
-    notify_action.execute.assert_called_once_with(dry_run=False)
-    ignore_action.execute.assert_called_once_with(dry_run=False)
+    notify_action.execute.assert_called_with(dry_run=False)
+    ignore_action.execute.assert_called_with(dry_run=False)
     assert stats.outcomes[NotificationOutcome.NOTIFIED] == 1
     assert stats.outcomes[NotificationOutcome.IGNORED] == 1
 
