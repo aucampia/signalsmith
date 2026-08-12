@@ -1,6 +1,24 @@
 """Fixtures/doubles shared across the test suite."""
 
+import pytest
+
 from signalsmith.github.models import GitHubIssue, GitHubNotification, GitHubPullRequest
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Forbid class-based tests - see AGENTS.md testing conventions."""
+    offenders = sorted(
+        {
+            f"{item.cls.__module__}.{item.cls.__qualname__}"
+            for item in items
+            if isinstance(item, pytest.Function) and item.cls is not None
+        }
+    )
+    if offenders:
+        raise pytest.UsageError(
+            "Test classes are forbidden, use standalone functions instead: "
+            + ", ".join(offenders)
+        )
 
 
 class MockProvider:
