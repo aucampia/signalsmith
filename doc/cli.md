@@ -4,8 +4,8 @@
 signalsmith  run | daemon | test | cache clean | spool list | spool clean | state clean | ignore list | ignore remove | ignore clear
 ```
 
-Every command accepts its own `--verbose`/`-v` (there is no global flag
-before the command name).
+Every command accepts `--help` or `-h`, and accepts its own `--verbose`/`-v`
+(there is no global flag before the command name).
 
 ## `run`
 

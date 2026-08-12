@@ -30,23 +30,46 @@ from .state.spool import SpoolManager
 
 logger = logging.getLogger(__name__)
 
-cli = typer.Typer(pretty_exceptions_enable=False)
-cache_cli = typer.Typer(pretty_exceptions_enable=False, help="Manage the local cache.")
-cli.add_typer(cache_cli, name="cache")
+cli = typer.Typer(
+    pretty_exceptions_enable=False,
+    context_settings={"help_option_names": ["--help", "-h"]},
+    no_args_is_help=True,
+)
+cache_cli = typer.Typer(
+    pretty_exceptions_enable=False,
+    help="Manage the local cache.",
+    context_settings={"help_option_names": ["--help", "-h"]},
+    no_args_is_help=True,
+)
+cli.add_typer(cache_cli, name="cache", no_args_is_help=True)
 spool_cli = typer.Typer(
-    pretty_exceptions_enable=False, help="Manage the notification spool."
+    pretty_exceptions_enable=False,
+    help="Manage the notification spool.",
+    context_settings={"help_option_names": ["--help", "-h"]},
+    no_args_is_help=True,
 )
-cli.add_typer(spool_cli, name="spool")
-state_cli = typer.Typer(pretty_exceptions_enable=False, help="Manage local state.")
-cli.add_typer(state_cli, name="state")
+cli.add_typer(spool_cli, name="spool", no_args_is_help=True)
+state_cli = typer.Typer(
+    pretty_exceptions_enable=False,
+    help="Manage local state.",
+    context_settings={"help_option_names": ["--help", "-h"]},
+    no_args_is_help=True,
+)
+cli.add_typer(state_cli, name="state", no_args_is_help=True)
 ignore_cli = typer.Typer(
-    pretty_exceptions_enable=False, help="Manage the permanent-ignore store."
+    pretty_exceptions_enable=False,
+    help="Manage the permanent-ignore store.",
+    context_settings={"help_option_names": ["--help", "-h"]},
+    no_args_is_help=True,
 )
-cli.add_typer(ignore_cli, name="ignore")
+cli.add_typer(ignore_cli, name="ignore", no_args_is_help=True)
 history_cli = typer.Typer(
-    pretty_exceptions_enable=False, help="View notification outcome history."
+    pretty_exceptions_enable=False,
+    help="View notification outcome history.",
+    context_settings={"help_option_names": ["--help", "-h"]},
+    no_args_is_help=True,
 )
-cli.add_typer(history_cli, name="history")
+cli.add_typer(history_cli, name="history", no_args_is_help=True)
 
 
 def _open_spool(config: Config, *, check_version: bool = True) -> SpoolManager:
