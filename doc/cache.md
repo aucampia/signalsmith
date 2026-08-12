@@ -47,7 +47,7 @@ user from `GET /user`. Since it never changes, it's cached indefinitely.
 
 ## Notification Archive
 
-`${XDG_CACHE_HOME}/signalsmith/notifications-archive-<YYYYMMDDT<HH>Z>.jsonl`
+`${XDG_CACHE_HOME}/signalsmith/notifications-archive-<YYYYMMDDTHHZ>.jsonl`
 (one file per UTC hour) — every fetch result is appended here, regardless
 of `--limit`, `--cache-only`, or `--refresh-notifications`.
 
