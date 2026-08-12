@@ -4,13 +4,19 @@ GitHub notifications manager with desktop alerts and Jinja-based filtering.
 
 ## Features
 
-- **Desktop notifications** for filtered GitHub notifications (cross-platform via `desktop-notifier`); `signalsmith daemon` additionally supports clicking a notification to open its subject in a browser, and optional Dismiss/Ignore action buttons
-- **Powerful Jinja filtering** with two-stage evaluation (notification + subject fields)
+- **Desktop notifications** for filtered GitHub notifications
+  (cross-platform via `desktop-notifier`); `signalsmith daemon`
+  additionally supports clicking a notification to open its subject in
+  a browser, and optional Dismiss/Ignore action buttons
+- **Powerful Jinja filtering** with two-stage evaluation (notification +
+  subject fields)
 - **Organization filtering** with include/exclude masks
 - **Flexible actions**: notify, mark-as-read, or custom combinations
 - **Reusable action definitions** for DRY configuration
-- **Smart caching** with conditional GitHub API requests (ETags, If-Modified-Since)
-- **Durable spool** of notified notifications (also drives renotify intervals) until they're read upstream
+- **Smart caching** with conditional GitHub API requests (ETags,
+  If-Modified-Since)
+- **Durable spool** of notified notifications (also drives renotify
+  intervals) until they're read upstream
 - **Daemon mode** for continuous polling
 
 ## Installation
@@ -24,10 +30,10 @@ uv tool install git+https://github.com/aucampia/signalsmith
 For development installation, see [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 > **Upgrading from a version predating the notification spool?**
-> `${XDG_DATA_HOME}/signalsmith/state.json` is no longer used and can be deleted.
-> Renotify timestamps now live in the spool instead, so expect one round of
-> re-notifications for anything still unread on your first run after
-> upgrading. See [doc/config.md](./doc/config.md#spool).
+> `${XDG_DATA_HOME}/signalsmith/state.json` is no longer used and can be
+> deleted. Renotify timestamps now live in the spool instead, so expect one
+> round of re-notifications for anything still unread on your first run after
+> upgrading. See [doc/state.md](./doc/state.md).
 
 ## Quick Start
 
@@ -40,6 +46,7 @@ signalsmith run
 ```
 
 Options:
+
 - `--verbose` / `-v` - Debug logging
 - `--cache-only` - Use cached notifications (no API call)
 - `--force` - Ignore renotify intervals
@@ -55,13 +62,15 @@ Run continuously with periodic polling:
 signalsmith daemon --poll-interval 300
 ```
 
-Polls every 300 seconds (5 minutes) by default, or uses `poll_interval` from config.
-This is a lower bound — if GitHub's response includes an `X-Poll-Interval` header
-asking for a longer wait, signalsmith sleeps for that instead.
+Polls every 300 seconds (5 minutes) by default, or uses `poll_interval` from
+config. This is a lower bound — if GitHub's response includes an
+`X-Poll-Interval` header asking for a longer wait, signalsmith sleeps for that
+instead.
 
 ## Configuration
 
-Create `~/.config/signalsmith/config.yaml` (or set `SIGNALSMITH_CONFIG` to a custom path):
+Create `~/.config/signalsmith/config.yaml` (or set `SIGNALSMITH_CONFIG`
+to a custom path):
 
 ```yaml
 version: '4.0'  # config file schema version (see doc/config.md#versioning)
@@ -101,14 +110,16 @@ rules:
 
 ### Example Configurations
 
-See [`examples/config.yaml`](examples/config.yaml) for a complete working example with:
+See [`examples/config.yaml`](examples/config.yaml) for a complete working
+example with:
+
 - On-topic and off-topic repository filtering
 - Bot PR auto-dismissal
 - Team-based spam filtering
 - Direct assignee/reviewer notifications
 
-The [`examples/tests/`](examples/tests/) directory contains comprehensive rule tests
-for the example config. You can run them with:
+The [`examples/tests/`](examples/tests/) directory contains comprehensive rule
+tests for the example config. You can run them with:
 
 ```bash
 SIGNALSMITH_CONFIG_DIR=examples signalsmith test
@@ -169,39 +180,36 @@ export GITHUB_TOKEN=ghp_...
 signalsmith uses [Jinja](https://jinja.palletsprojects.com/) expressions for
 filtering - the same engine `notice`/`notify` templates use, evaluated to a
 real value rather than rendered to text. See
-[doc/config.md](./doc/config.md#rule-expressions-are-jinja) for the full
+[Rule Expression Reference](./doc/rules.md) for the full
 picture, including `StrictUndefined` behavior and the filters that replace
 CEL-style macros like `exists`/`all`.
 
 ### Two-Stage Rule Evaluation
 
-1. **Notification expression**: Evaluated against the notification object (fast, cached)
-2. **Subject expression** (optional): Evaluated against the fetched Issue/PR (requires API call)
+1. **Notification expression**: Evaluated against the notification object
+   (fast, cached)
+2. **Subject expression** (optional): Evaluated against the fetched
+   Issue/PR (requires API call)
 
 This allows efficient filtering without fetching every subject from the API.
 
-### Available Fields
+### Available Objects
 
-See [doc/config.md](./doc/config.md#two-stage-rule-evaluation) for the complete field reference.
+Rule expressions and templates have access to four objects:
+`notification` (GitHub API notification, always available), `subject` (full
+Issue/PR, fetched on demand), `account` (`{github: {username: "..."}}`),
+and `variables` (your user-defined `variables:` block).
 
-**Notification fields:**
-- `notification.id`, `notification.reason`, `notification.unread`, `notification.updated_at`
-- `notification.subject.title`, `notification.subject.type`
-- `notification.repository.name`, `notification.repository.full_name`
-
-**Subject fields** (Issues/PRs):
-- `subject.state`, `subject.user.login`, `subject.labels[]`, `subject.assignees[]`
-- PR-specific: `subject.draft`, `subject.mergeable_state`, `subject.requested_reviewers[]`
+See [Object Reference](./doc/objects.md) for the complete field reference.
 
 ### Notice and Notify Templates
 
-Rather than write a `title`/`body` on every `notify` action, a top-level
-`notice:` block computes one generically, using [Jinja](https://jinja.palletsprojects.com/)
-templates with the same fields as the rule expressions above (plus `subject`,
-`account`, `variables`). A `notify` action can use it verbatim (`notify: {}`)
-or override just `title`/`body`, referencing the computed notice as
-`{{ notice.title }}`/`{{ notice.body }}`. See
-[doc/config.md](./doc/config.md#notices-and-templates) for the full picture.
+A top-level `notice:` block computes a generic title/body per notification.
+`notify: {}` uses it verbatim; `notify: {title: '...'}` overrides individual
+fields, with `{{ notice.title }}`/`{{ notice.body }}` available in scope.
+
+See [Template Reference](./doc/templates.md) for template context variables
+and failure handling.
 
 ### Example Rules
 
@@ -226,9 +234,11 @@ expression: |
 
 ## Development
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow and project structure.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow and project
+structure.
 
 Quick commands:
+
 ```bash
 task configure       # Install dependencies
 task validate:fix    # Auto-fix formatting
@@ -241,8 +251,21 @@ task cli             # Run CLI locally
 ## Documentation
 
 - **[SPEC.md](./SPEC.md)** - Technical specification and architecture
-- **[doc/config.md](./doc/config.md)** - Configuration reference
-- **[doc/test-format.md](./doc/test-format.md)** - Test file format
+- **[doc/config.md](./doc/config.md)** — Configuration file format,
+  rules, notice templates, authentication, versioning
+- **[doc/objects.md](./doc/objects.md)** — Field reference for
+  `notification`, `subject`, `account`, `variables`
+- **[doc/rules.md](./doc/rules.md)** — Rule expression reference
+  (operators, idioms, lazy subject)
+- **[doc/templates.md](./doc/templates.md)** — `notice`/`notify` template
+  reference (context variables, failure handling)
+- **[doc/actions.md](./doc/actions.md)** — Action reference (notify,
+  ignore, mark_as_read)
+- **[doc/state.md](./doc/state.md)** — State directory reference (spool,
+  permanent ignore store, history, versioning)
+- **[doc/cache.md](./doc/cache.md)** — Cache directory reference
+  (layout, conditional requests, archive, versioning)
+- **[doc/test-format.md](./doc/test-format.md)** — Test file format
 - **[doc/cli.md](./doc/cli.md)** - CLI reference
 - **[CONTRIBUTING.md](./CONTRIBUTING.md)** - Development guide
 

@@ -1,9 +1,9 @@
 # AGENTS.md — signalsmith
 
-signalsmith is a programmable notification manager that filters GitHub notifications
-(and eventually other platforms like Jira) to reduce spam. It pulls unread
-notifications, filters them using Jinja expression rules, auto-dismisses what you
-don't care about, and alerts only on what matters.
+signalsmith is a programmable notification manager that filters GitHub
+notifications (and eventually other platforms like Jira) to reduce spam. It
+pulls unread notifications, filters them using Jinja expression rules,
+auto-dismisses what you don't care about, and alerts only on what matters.
 
 ## Documentation
 
@@ -78,10 +78,10 @@ unrelated to each other and to the package version in `pyproject.toml`.
   compatible but warned about (older signalsmith code may not understand
   fields a newer minor added). A missing version is treated as `0.0`.
 - **State/cache**: an incompatible version tells the user to run
-  `signalsmith state clean` / `signalsmith cache clean` and re-run — signalsmith does not
-  clear it automatically. A newer-minor state directory warns that writing
-  to it may lose data added by the newer version (cache is disposable, so
-  no such warning there).
+  `signalsmith state clean` / `signalsmith cache clean` and re-run
+  — signalsmith does not clear it automatically. A newer-minor state
+  directory warns that writing to it may lose data added by the newer
+  version (cache is disposable, so no such warning there).
 - **Config/test files**: an incompatible version refuses to run (clear
   error, no fallback/auto-fix) and tells the user to update the file by
   hand.
