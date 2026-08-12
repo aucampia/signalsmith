@@ -84,6 +84,22 @@ tasks:
         if [ -n "$files" ]; then
           mise exec -- shellcheck $files
         fi
+  rumdl:check:
+    desc: Run rumdl markdown linter
+    cmds:
+      - |
+        files=$(git -c safe.directory='*' ls-files -- '*.md' ':!:.opencode/*')
+        if [ -n "$files" ]; then
+          mise exec -- rumdl check {{if (ne (.FIX | default "false") "false")}}--fix {{end}}$files
+        fi
+  rumdl:format:
+    desc: Run rumdl markdown formatter
+    cmds:
+      - |
+        files=$(git -c safe.directory='*' ls-files -- '*.md' ':!:.opencode/*')
+        if [ -n "$files" ]; then
+          mise exec -- rumdl fmt {{if (ne (.CHECK | default "false") "false")}}--check {{end}}$files
+        fi
   license:fetch:
     desc: Fetch the canonical CC0-1.0 license text into LICENSE
     cmds:
@@ -117,6 +133,9 @@ tasks:
       - task: shfmt
         vars: {CHECK: "true"}
       - task: shellcheck
+      - task: rumdl:format
+        vars: {CHECK: "true"}
+      - task: rumdl:check
         # - task: pip-audit
   validate:fix:
     desc: Fix auto-fixable validation errors.
@@ -126,6 +145,9 @@ tasks:
       - task: ruff:format
       - task: yamlfmt
       - task: shfmt
+      - task: rumdl:format
+      - task: rumdl:check
+        vars: {FIX: "true"}
   validate:
     desc: Perform all validation
     cmds:

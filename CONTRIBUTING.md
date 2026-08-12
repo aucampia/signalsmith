@@ -2,7 +2,7 @@
 
 ## Repository Layout
 
-```
+```text
 signalsmith/
 ├── src/signalsmith/                 # Python source code
 │   ├── cli.py                   # CLI entry point (Typer): flags -> app/ -> render
@@ -87,15 +87,18 @@ signalsmith/
 ### Initial Setup
 
 1. **Install dependencies:**
+
    ```bash
    task configure
    ```
+
    This runs `mise install` (fetches the pinned versions of `task`,
    `yamlfmt`, `shfmt`, `shellcheck`, and `uv` from `.mise.toml`) and then
    `uv sync` to install Python dependencies including dev tools.
 
    Alternatively, run everything in the containerized devtools environment
    (also what CI uses) without installing `mise`/`uv` locally:
+
    ```bash
    docker compose run --rm devtools task configure validate
    ```
@@ -110,15 +113,20 @@ signalsmith/
 Run these commands in order:
 
 1. **Auto-fix formatting and linting:**
+
    ```bash
    task validate:fix
    ```
-   This runs `ruff format` and `ruff check --fix` to automatically fix code style issues.
+
+   This runs `ruff format` and `ruff check --fix` to automatically fix
+   code style issues.
 
 2. **Run static checks:**
+
    ```bash
    task validate:static
    ```
+
    This runs:
    - `mypy` - Type checking (strict mode)
    - `ruff check` - Linting
@@ -127,15 +135,19 @@ Run these commands in order:
    - `shfmt` / `shellcheck` - Shell script formatting and linting
 
 3. **Run tests:**
+
    ```bash
    task test
    ```
+
    This runs pytest with coverage reporting.
 
 4. **Full validation (static checks + tests):**
+
    ```bash
    task validate
    ```
+
    Runs `validate:static` then `test` - it does *not* run `validate:fix`.
    Use `task fix-and-validate` to run all three (`validate:fix`,
    `validate:static`, `test`) in sequence.
@@ -171,14 +183,18 @@ uv run signalsmith daemon --poll-interval 300
 ## Configuration Files
 
 Example config files live in `examples/`:
-- **[`examples/config.yaml`](examples/config.yaml)** - Complete working configuration with common filtering patterns
-- **[`examples/tests/*.yaml`](examples/tests/)** - Rule test suite for the example config
+
+- **[`examples/config.yaml`](examples/config.yaml)** - Complete working
+  configuration with common filtering patterns
+- **[`examples/tests/*.yaml`](examples/tests/)** - Rule test suite for the
+  example config
 
 User configs go in `~/.config/signalsmith/config.yaml` (not tracked in git).
 
 ## Dependencies
 
 Dependencies are managed via `pyproject.toml`:
+
 - **Runtime:** Listed in `[project.dependencies]`
 - **Development:** Listed in `[dependency-groups.dev]`
 
