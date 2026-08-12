@@ -178,74 +178,82 @@ def _make_entry(
     )
 
 
-class TestHistoryList:
-    @pytest.fixture(autouse=True)
-    def _patch_history_store(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        self.mock_store = MagicMock()
-        self.mock_store_class = MagicMock(return_value=self.mock_store)
-        monkeypatch.setattr(cli_module, "HistoryStore", self.mock_store_class)
+@pytest.fixture
+def mock_history_store(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    store = MagicMock()
+    store_class = MagicMock(return_value=store)
+    monkeypatch.setattr(cli_module, "HistoryStore", store_class)
+    return store
 
-    def test_empty(self) -> None:
-        self.mock_store.entries.return_value = []
 
-        result = runner.invoke(cli, ["history", "list"])
+def test_history_list_empty(mock_history_store: MagicMock) -> None:
+    mock_history_store.entries.return_value = []
 
-        assert result.exit_code == 0
-        assert "History is empty" in result.output
+    result = runner.invoke(cli, ["history", "list"])
 
-    def test_default_format(self) -> None:
-        self.mock_store.entries.return_value = [
-            (Path("/none/github-456.json"), _make_entry()),
-        ]
+    assert result.exit_code == 0
+    assert "History is empty" in result.output
 
-        result = runner.invoke(cli, ["history", "list"])
 
-        assert result.exit_code == 0
-        assert "github-456" in result.output
-        assert "notified" in result.output
-        assert "r1" in result.output
-        assert "PR: fix thing" in result.output
+def test_history_list_default_format(mock_history_store: MagicMock) -> None:
+    mock_history_store.entries.return_value = [
+        (Path("/none/github-456.json"), _make_entry()),
+    ]
 
-    def test_json_format(self) -> None:
-        self.mock_store.entries.return_value = [
-            (Path("/none/github-456.json"), _make_entry()),
-        ]
+    result = runner.invoke(cli, ["history", "list"])
 
-        result = runner.invoke(cli, ["history", "list", "--json"])
+    assert result.exit_code == 0
+    assert "github-456" in result.output
+    assert "notified" in result.output
+    assert "r1" in result.output
+    assert "PR: fix thing" in result.output
 
-        assert result.exit_code == 0
-        assert '"provider": "github"' in result.output
-        assert '"notification_id": "456"' in result.output
-        assert '"outcome": "notified"' in result.output
 
-    def test_action_filter_passed(self) -> None:
-        self.mock_store.entries.return_value = []
+def test_history_list_json_format(mock_history_store: MagicMock) -> None:
+    mock_history_store.entries.return_value = [
+        (Path("/none/github-456.json"), _make_entry()),
+    ]
 
-        result = runner.invoke(cli, ["history", "list", "--action", "ignored"])
+    result = runner.invoke(cli, ["history", "list", "--json"])
 
-        assert result.exit_code == 0
-        self.mock_store.entries.assert_called_with(limit=20, action="ignored")
+    assert result.exit_code == 0
+    assert '"provider": "github"' in result.output
+    assert '"notification_id": "456"' in result.output
+    assert '"outcome": "notified"' in result.output
 
-    def test_limit_passed(self) -> None:
-        self.mock_store.entries.return_value = []
 
-        result = runner.invoke(cli, ["history", "list", "--limit", "5"])
+def test_history_list_action_filter_passed(mock_history_store: MagicMock) -> None:
+    mock_history_store.entries.return_value = []
 
-        assert result.exit_code == 0
-        self.mock_store.entries.assert_called_with(limit=5, action=None)
+    result = runner.invoke(cli, ["history", "list", "--action", "ignored"])
 
-    def test_invalid_action(self) -> None:
-        result = runner.invoke(cli, ["history", "list", "--action", "bogus"])
+    assert result.exit_code == 0
+    mock_history_store.entries.assert_called_with(limit=20, action="ignored")
 
-        assert result.exit_code != 0
-        assert "Invalid outcome" in result.output
 
-    def test_limit_zero(self) -> None:
-        result = runner.invoke(cli, ["history", "list", "--limit", "0"])
+def test_history_list_limit_passed(mock_history_store: MagicMock) -> None:
+    mock_history_store.entries.return_value = []
 
-        assert result.exit_code != 0
+    result = runner.invoke(cli, ["history", "list", "--limit", "5"])
 
-    def test_limit_negative(self) -> None:
-        result = runner.invoke(cli, ["history", "list", "--limit", "-1"])
+    assert result.exit_code == 0
+    mock_history_store.entries.assert_called_with(limit=5, action=None)
 
-        assert result.exit_code != 0
+
+def test_history_list_invalid_action() -> None:
+    result = runner.invoke(cli, ["history", "list", "--action", "bogus"])
+
+    assert result.exit_code != 0
+    assert "Invalid outcome" in result.output
+
+
+def test_history_list_limit_zero() -> None:
+    result = runner.invoke(cli, ["history", "list", "--limit", "0"])
+
+    assert result.exit_code != 0
+
+
+def test_history_list_limit_negative() -> None:
+    result = runner.invoke(cli, ["history", "list", "--limit", "-1"])
+
+    assert result.exit_code != 0
