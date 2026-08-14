@@ -52,6 +52,19 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
+def _sarif_ref(raw_ref: str | None) -> str | None:
+    """Rewrite `refs/pull/<n>/merge` to `refs/pull/<n>/head`.
+
+    The Code Scanning API 422s when `ref` and `commit_sha` don't refer to the
+    same commit. On `pull_request` events GITHUB_REF is the ephemeral merge
+    ref, but GHA_CHECK_HEAD_SHA (like check runs need) is the PR head sha -
+    same fix github/codeql-action applies for the same reason.
+    """
+    if raw_ref and raw_ref.startswith("refs/pull/") and raw_ref.endswith("/merge"):
+        return raw_ref.removesuffix("/merge") + "/head"
+    return raw_ref
+
+
 @dataclass(frozen=True, kw_only=True)
 class Env:
     actions: bool
@@ -77,7 +90,7 @@ class Env:
             run_id=os.environ.get("GITHUB_RUN_ID") or None,
             run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT") or None,
             head_sha=os.environ.get("GHA_CHECK_HEAD_SHA") or None,
-            ref=os.environ.get("GITHUB_REF") or None,
+            ref=_sarif_ref(os.environ.get("GITHUB_REF") or None),
             state_path=Path(os.environ.get("GHA_CHECK_STATE", _DEFAULT_STATE_PATH)),
             dry_run=os.environ.get("GHA_CHECK_DRY_RUN", "") not in ("", "0", "false"),
         )
@@ -192,13 +205,25 @@ def _run_passthrough(command: Sequence[str]) -> int:
     return subprocess.run(command, check=False).returncode
 
 
-def _summarize_sarif(text: str, *, max_results: int = 50) -> str | None:
-    """Render SARIF `results` as short human-readable lines, or None if `text` isn't SARIF."""
+def _parse_sarif_results(text: str) -> list[dict[str, Any]] | None:
+    """Return the SARIF `results` across all runs, or None if `text` isn't SARIF.
+
+    Parenthesized despite ruff's py314 target: this runs via a bare `python3`
+    outside the project's uv-managed venv (see module docstring), so it must
+    stay syntax-compatible with whatever python3 the GitHub Actions runner or
+    devtools container happen to provide - not necessarily 3.14.
+    """
     try:
         doc = json.loads(text)
-        results = [r for run in doc["runs"] for r in run.get("results", [])]
-    except json.JSONDecodeError, KeyError, TypeError:
+        return [r for run in doc["runs"] for r in run.get("results", [])]
+    except (json.JSONDecodeError, KeyError, TypeError):  # fmt: skip
         return None
+
+
+def _summarize_sarif_results(
+    results: list[dict[str, Any]], *, max_results: int = 50
+) -> str:
+    """Render SARIF `results` as short human-readable lines."""
     if not results:
         return "No SARIF results."
     lines = []
@@ -289,13 +314,25 @@ def _run_reported(
     duration = time.monotonic() - start
     completed_at = _now_iso()
 
-    conclusion = "success" if exit_code == 0 else "failure"
     log_tail = _tail(tail)
     if output_is_sarif:
         full_text = "".join(full_lines)
-        log_tail = _summarize_sarif(full_text) or log_tail
+        sarif_results = _parse_sarif_results(full_text)
+        if sarif_results is not None:
+            log_tail = _summarize_sarif_results(sarif_results)
+            # Some SARIF-capable tools (zizmor among them) always exit 0 in
+            # SARIF mode, leaving pass/fail entirely to the SARIF results
+            # themselves - so a non-empty result set fails the check run
+            # even though the process didn't.
+            if sarif_results and exit_code == 0:
+                _warn(
+                    f"{name}: exited 0 but SARIF reported {len(sarif_results)} "
+                    "result(s); treating the check run as failed"
+                )
+                exit_code = 1
         if env.reporting_enabled():
             _upload_sarif(env, name, full_text, started_at)
+    conclusion = "success" if exit_code == 0 else "failure"
     try:
         _complete_check_run(
             env,
