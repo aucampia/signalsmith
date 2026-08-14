@@ -153,6 +153,10 @@ tasks:
     desc: Run zizmor with autofix
     cmds:
       - "{{.CHECK_RUN_PREFIX}} {{.ZIZMOR}} --fix .github/workflows"
+  actionlint:
+    desc: Run actionlint (GitHub Actions workflow linter)
+    cmds:
+      - "{{.CHECK_RUN_PREFIX}} mise exec -- actionlint {{.CLI_ARGS}}"
   license:fetch:
     desc: Fetch the canonical CC0-1.0 license text into LICENSE
     cmds:
@@ -177,7 +181,7 @@ tasks:
     desc: Perform static validation
     vars:
       STATIC_CHECKS: >-
-        mypy codespell ruff:format:check ruff:lint yamlfmt shfmt shellcheck rumdl:format:check rumdl:check zizmor
+        mypy codespell ruff:format:check ruff:lint yamlfmt shfmt shellcheck rumdl:format:check rumdl:check zizmor actionlint
       # Exactly one of these is non-empty. An empty `for` var expands to zero
       # iterations, so the unused branch disappears entirely.
       STATIC_DEPS: '{{if (mustFromJson .VALIDATE_PARALLEL)}}{{.STATIC_CHECKS}}{{end}}'
