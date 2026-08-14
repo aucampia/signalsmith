@@ -24,7 +24,7 @@ auto-dismisses what you don't care about, and alerts only on what matters.
 - `uv` for dependency management
 - `task` as task runner (see Taskfile.yml)
 - `mise` (`.mise.toml`) pins the non-Python CLI tools `task` itself relies
-  on plus `uv`: `task`, `yamlfmt`, `shfmt`, `shellcheck`, `uv`. `task
+  on plus `uv`: `task`, `yamlfmt`, `shfmt`, `shellcheck`, `uv`, `rumdl`. `task
   configure` runs `mise install` before `uv sync`. `mise.lock` (kept
   up to date automatically, `[settings] lockfile = true`) additionally pins
   the exact checksum/URL per tool+platform, on top of the exact versions
@@ -35,17 +35,23 @@ auto-dismisses what you don't care about, and alerts only on what matters.
   which installs whatever `.mise.toml` declares on demand
   (`docker compose run --rm devtools task configure validate`) — used by CI
   (`.github/workflows/validate.yml`) and optionally by contributors who
-  don't want to install `mise`/`uv` locally.
+  don't want to install `mise`/`uv` locally. In CI, each `validate:static`/
+  `validate` leaf task also reports its own GitHub check run via
+  `devtools/gha-check-run.py` (wired in through `Taskfile.yml`'s
+  `CHECK_RUN_PREFIX`), so a PR shows which specific tool failed; this has no
+  effect on local `task` runs.
 
 ## Quick Commands
 
 - `task configure` — Install dependencies (mise-managed tools + uv deps)
 - `task validate:fix` — Auto-fix formatting and linting
 - `task validate:static` — Type checking, linting (mypy, ruff, codespell,
-  yamlfmt, shfmt, shellcheck)
+  yamlfmt, shfmt, shellcheck, rumdl) — tools run concurrently and every tool
+  runs to completion, so a failure in one does not hide failures in the rest
 - `task test` — Run pytest with coverage
-- `task validate` — static checks + test (does *not* run `validate:fix`; use
-  `task fix-and-validate` for fix + static + test)
+- `task validate` — static checks + test + examples:test, run concurrently
+  (does *not* run `validate:fix`; use `task fix-and-validate` for fix +
+  validate)
 
 ## Best Practices and Communication
 

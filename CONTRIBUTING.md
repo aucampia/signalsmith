@@ -129,10 +129,15 @@ Run these commands in order:
 
    This runs:
    - `mypy` - Type checking (strict mode)
-   - `ruff check` - Linting
+   - `ruff check` / `ruff format --check` - Linting and formatting
    - `codespell` - Spell checking
    - `yamlfmt` - YAML formatting (CI/infra files only)
    - `shfmt` / `shellcheck` - Shell script formatting and linting
+   - `rumdl` - Markdown formatting and linting
+
+   The tools run concurrently (via go-task `deps:`) and every tool always
+   runs to completion, so one failing tool does not hide failures in the
+   others - the command exits non-zero if any of them failed.
 
 3. **Run tests:**
 
@@ -148,9 +153,10 @@ Run these commands in order:
    task validate
    ```
 
-   Runs `validate:static` then `test` - it does *not* run `validate:fix`.
-   Use `task fix-and-validate` to run all three (`validate:fix`,
-   `validate:static`, `test`) in sequence.
+   Runs `validate:static`, `test`, and `examples:test` (which runs
+   `signalsmith test` against `examples/config.yaml`) concurrently - it does
+   *not* run `validate:fix`. Use `task fix-and-validate` to run all of them
+   (`validate:fix`, then `validate`) in sequence.
 
 ### Running the CLI Locally
 
@@ -213,13 +219,19 @@ workflow (`.github/workflows/validate.yml`), which runs `task configure
 validate` inside the `devtools` container (see `docker-compose.yaml`) — the
 same command described in the Validation Workflow section above.
 
+Each tool in `validate:static`/`validate` also reports its own GitHub check
+run (`mypy`, `ruff:lint`, `test`, etc.), so a PR shows which specific tool
+failed instead of just the overall `Validate / validate` job — see
+`devtools/gha-check-run.py`, wired in via `Taskfile.yml`'s
+`CHECK_RUN_PREFIX`. This has no effect on local `task` runs.
+
 ## Project Tooling
 
 - **Package manager:** uv (fast Python package installer)
 - **Build backend:** hatchling
 - **Task runner:** go-task (Taskfile.yml)
 - **Tool version pinning:** mise (`.mise.toml`) for `task`, `yamlfmt`,
-  `shfmt`, `shellcheck`, `uv`
+  `shfmt`, `shellcheck`, `uv`, `rumdl`
 - **CLI framework:** Typer
 - **Data validation:** Pydantic v2, via `pydantic.dataclasses.dataclass` (not
   `BaseModel` — see AGENTS.md for the narrow exception and why)

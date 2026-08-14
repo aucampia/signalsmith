@@ -20,6 +20,15 @@ services:
       # GitHub API calls (tool version resolution, uv's artifact attestation
       # check) or it quickly hits the unauthenticated rate limit.
       - GITHUB_TOKEN
+      # Passed through so devtools/gha-check-run.py (see Taskfile.yml's
+      # CHECK_RUN_PREFIX) can report each leaf task as its own check run.
+      - GITHUB_ACTIONS
+      - GITHUB_REPOSITORY
+      - GITHUB_API_URL
+      - GITHUB_SERVER_URL
+      - GITHUB_RUN_ID
+      - GITHUB_RUN_ATTEMPT
+      - GHA_CHECK_HEAD_SHA
       # `.mise.toml`'s [settings] table needs mise's config-trust step, which
       # there's no interactive prompt for here (no custom entrypoint to run
       # `mise trust` first) - this is mise's own sanctioned non-interactive

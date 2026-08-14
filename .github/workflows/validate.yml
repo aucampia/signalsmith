@@ -9,8 +9,15 @@ concurrency:
   cancel-in-progress: true
 env:
   __DEVTOOLS_CACHE_DIR: ${{ github.workspace }}/.cache/devtools
+  # github.sha is the ephemeral merge commit on pull_request events; check
+  # runs need the PR's actual head commit or they won't show up on the PR.
+  GHA_CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 permissions:
   contents: read
+  # Lets devtools/gha-check-run.py report per-tool check runs. Not granted
+  # on fork PRs (read-only token there) - the script detects that and falls
+  # back to running tools with no reporting.
+  checks: write
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -38,9 +45,20 @@ jobs:
         run: |
           set -x -Eeuo pipefail
           docker compose --progress quiet run --rm devtools task configure validate
-          sudo chown -R "$(id -u):$(id -g)" .
         env:
           # mise needs this for GitHub API calls (tool version resolution,
           # uv's artifact attestation check) or it hits the unauthenticated
-          # rate limit almost immediately.
+          # rate limit almost immediately; gha-check-run.py needs it too.
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+      - name: Fix workspace ownership
+        # if: always() so this (and the state file the next step reads)
+        # aren't skipped when validation fails.
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" .
+      - name: Report check results
+        # Closes out any check run left in_progress by a cancelled/killed
+        # job, and writes a pass/fail summary to the job's summary page.
+        if: always()
+        run: python3 ./devtools/gha-check-run.py finalize
+        env:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"

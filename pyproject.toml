@@ -116,6 +116,10 @@ ignore = [
 # BaseModel's extra="allow" dump support (see comment in github/models.py) -
 # pydantic dataclasses silently drop extra fields on serialization.
 "src/signalsmith/github/models.py" = ["TID251"]
+# Talks to the GitHub API via urllib (stdlib-only, see module docstring) -
+# the URL is always https://<GITHUB_API_URL>/repos/<GITHUB_REPOSITORY>/..., a
+# fixed scheme built from trusted CI-provided env vars.
+"devtools/gha-check-run.py" = ["S310"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "pydantic.BaseModel".msg = "Use pydantic.dataclasses.dataclass instead (see AGENTS.md)."
@@ -139,7 +143,7 @@ asyncio_mode = "auto"
 
 [tool.mypy]
 # https://mypy.readthedocs.io/en/stable/config_file.html
-files = "src,tests"
+files = "src,tests,devtools"
 mypy_path = "src:tests"
 python_version = "3.14"
 strict = true

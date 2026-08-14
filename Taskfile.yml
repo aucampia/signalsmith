@@ -1,14 +1,28 @@
 # https://taskfile.dev/usage/
 # https://pkg.go.dev/text/template
 # https://go-task.github.io/slim-sprig/
-# 
+#
 version: "3"
+# validate:static/validate run tools concurrently (deps: below), so group
+# output keeps each tool's output as one block instead of interleaving them;
+# the ::group:: markers only apply under GitHub Actions since begin/end are
+# templated (unlike the output mode itself).
+output:
+  group:
+    begin: '{{if env "GITHUB_ACTIONS"}}::group::{{.TASK}}{{end}}'
+    end: '{{if env "GITHUB_ACTIONS"}}::endgroup::{{end}}'
 vars:
   PYTHON: python3
   RUN_PREFIX: "uv run"
   RUN_PYTHON: "{{.RUN_PREFIX}} python"
-  PY_SOURCE: "src tests"
+  PY_SOURCE: "src tests devtools"
   YAML_SOURCE: "Taskfile.yml docker-compose.yaml .github/workflows"
+  # Empty outside GitHub Actions, so local runs are unaffected. {{.TASK}}
+  # resolves to the currently-executing task because task injects its
+  # special vars before templating vars like this one. Plain python3, not
+  # RUN_PYTHON/`uv run`, so it works before `uv sync` (see gha-check-run.py).
+  CHECK_RUN_PREFIX: >-
+    {{if env "GITHUB_ACTIONS"}}{{.PYTHON}} devtools/gha-check-run.py run --data {{(dict "task" .TASK) | mustToJson | q}} --{{end}}
 tasks:
   configure:
     desc: Configure this project
@@ -51,55 +65,65 @@ tasks:
   ruff:format:
     desc: Run ruff formatter
     cmds:
-      - '{{.RUN_PREFIX}} ruff format --config pyproject.toml {{if (ne (.CHECK | default "false") "false")}}--check --diff {{end}}{{.CLI_ARGS | default .PY_SOURCE}}'
+      - '{{.CHECK_RUN_PREFIX}} {{.RUN_PREFIX}} ruff format --config pyproject.toml {{if (ne (.CHECK | default "false") "false")}}--check --diff {{end}}{{.CLI_ARGS | default .PY_SOURCE}}'
   ruff:lint:
     desc: Run ruff linter
     cmds:
-      - '{{.RUN_PREFIX}} ruff check --config pyproject.toml {{if (mustFromJson (.FIX | default "false"))}}--fix-only {{end}}{{.CLI_ARGS | default .PY_SOURCE}}'
+      - '{{.CHECK_RUN_PREFIX}} {{.RUN_PREFIX}} ruff check --config pyproject.toml {{if (mustFromJson (.FIX | default "false"))}}--fix-only {{end}}{{.CLI_ARGS | default .PY_SOURCE}}'
   mypy:
     desc: Run mypy
     cmds:
-      - "{{.RUN_PYTHON}} -m mypy --show-error-context --show-error-codes {{.CLI_ARGS}}"
+      - "{{.CHECK_RUN_PREFIX}} {{.RUN_PYTHON}} -m mypy --show-error-context --show-error-codes {{.CLI_ARGS}}"
   codespell:
     desc: Run codespell
     cmds:
-      - "{{.RUN_PREFIX}} codespell {{.CLI_ARGS | default .PY_SOURCE}}"
+      - "{{.CHECK_RUN_PREFIX}} {{.RUN_PREFIX}} codespell {{.CLI_ARGS | default .PY_SOURCE}}"
   yamlfmt:
     desc: Run yamlfmt
     cmds:
-      - 'mise exec -- yamlfmt {{if (ne (.CHECK | default "false") "false")}}-lint {{end}}{{.CLI_ARGS | default .YAML_SOURCE}}'
+      - '{{.CHECK_RUN_PREFIX}} mise exec -- yamlfmt {{if (ne (.CHECK | default "false") "false")}}-lint {{end}}{{.CLI_ARGS | default .YAML_SOURCE}}'
+  # shfmt/shellcheck/rumdl:*: file discovery moved to a dynamic var (was an
+  # inline `files=$(...); if [ -n "$files" ]; then ...; fi` block) because
+  # CHECK_RUN_PREFIX can only wrap a single command line; status: skips the
+  # task the same way the old `if` guard did; catLines flattens the
+  # newline-separated file list so it doesn't split the templated command
+  # line into multiple invalid ones.
   shfmt:
     desc: Run shfmt (shell script formatter)
+    vars:
+      SH_FILES:
+        sh: git -c safe.directory='*' ls-files -- '*.sh'
+    status:
+      - '[ -z "{{.SH_FILES | trim}}" ]'
     cmds:
-      - |
-        files=$(git -c safe.directory='*' ls-files -- '*.sh')
-        if [ -n "$files" ]; then
-          mise exec -- shfmt {{if (ne (.CHECK | default "false") "false")}}-l -d{{else}}-w{{end}} $files
-        fi
+      - '{{.CHECK_RUN_PREFIX}} mise exec -- shfmt {{if (ne (.CHECK | default "false") "false")}}-l -d{{else}}-w{{end}} {{.SH_FILES | catLines}}'
   shellcheck:
     desc: Run shellcheck
+    vars:
+      SH_FILES:
+        sh: git -c safe.directory='*' ls-files -- '*.sh'
+    status:
+      - '[ -z "{{.SH_FILES | trim}}" ]'
     cmds:
-      - |
-        files=$(git -c safe.directory='*' ls-files -- '*.sh')
-        if [ -n "$files" ]; then
-          mise exec -- shellcheck $files
-        fi
+      - "{{.CHECK_RUN_PREFIX}} mise exec -- shellcheck {{.SH_FILES | catLines}}"
   rumdl:check:
     desc: Run rumdl markdown linter
+    vars:
+      MD_FILES:
+        sh: git -c safe.directory='*' ls-files -- '*.md' ':!:.opencode/*'
+    status:
+      - '[ -z "{{.MD_FILES | trim}}" ]'
     cmds:
-      - |
-        files=$(git -c safe.directory='*' ls-files -- '*.md' ':!:.opencode/*')
-        if [ -n "$files" ]; then
-          mise exec -- rumdl check {{if (ne (.FIX | default "false") "false")}}--fix {{end}}$files
-        fi
+      - '{{.CHECK_RUN_PREFIX}} mise exec -- rumdl check {{if (ne (.FIX | default "false") "false")}}--fix {{end}}{{.MD_FILES | catLines}}'
   rumdl:format:
     desc: Run rumdl markdown formatter
+    vars:
+      MD_FILES:
+        sh: git -c safe.directory='*' ls-files -- '*.md' ':!:.opencode/*'
+    status:
+      - '[ -z "{{.MD_FILES | trim}}" ]'
     cmds:
-      - |
-        files=$(git -c safe.directory='*' ls-files -- '*.md' ':!:.opencode/*')
-        if [ -n "$files" ]; then
-          mise exec -- rumdl fmt {{if (ne (.CHECK | default "false") "false")}}--check {{end}}$files
-        fi
+      - '{{.CHECK_RUN_PREFIX}} mise exec -- rumdl fmt {{if (ne (.CHECK | default "false") "false")}}--check {{end}}{{.MD_FILES | catLines}}'
   license:fetch:
     desc: Fetch the canonical CC0-1.0 license text into LICENSE
     cmds:
@@ -113,30 +137,32 @@ tasks:
   test:
     desc: Run tests
     cmds:
-      - "{{.RUN_PYTHON}} -m pytest {{.CLI_ARGS}}"
+      - "{{.CHECK_RUN_PREFIX}} {{.RUN_PYTHON}} -m pytest {{.CLI_ARGS}}"
   examples:test:
     desc: Run example config tests via CLI
     env:
       SIGNALSMITH_CONFIG_DIR: examples
     cmds:
-      - "{{.RUN_PREFIX}} signalsmith test"
+      - "{{.CHECK_RUN_PREFIX}} {{.RUN_PREFIX}} signalsmith test"
   validate:static:
     desc: Perform static validation
-    cmds:
-      - task: mypy
-      - task: codespell
+    # deps: run concurrently, and a failing one doesn't stop the others
+    # (task only cancels siblings when failfast is set, which isn't here).
+    deps:
+      - mypy
+      - codespell
       - task: ruff:format
         vars: {CHECK: "true"}
-      - task: ruff:lint
+      - ruff:lint
       - task: yamlfmt
         vars: {CHECK: "true"}
       - task: shfmt
         vars: {CHECK: "true"}
-      - task: shellcheck
+      - shellcheck
       - task: rumdl:format
         vars: {CHECK: "true"}
-      - task: rumdl:check
-        # - task: pip-audit
+      - rumdl:check
+      # - pip-audit
   validate:fix:
     desc: Fix auto-fixable validation errors.
     cmds:
@@ -150,10 +176,7 @@ tasks:
         vars: {FIX: "true"}
   validate:
     desc: Perform all validation
-    cmds:
-      - task: validate:static
-      - task: test
-      - task: examples:test
+    deps: ['validate:static', test, 'examples:test']
   fix-and-validate:
     desc: Perform all validation
     cmds:
@@ -179,18 +202,22 @@ tasks:
       - task: validate
   uv:
     desc: Run uv
+    interactive: true
     cmds:
       - "uv {{.CLI_ARGS}}"
   cli:
     desc: Run cli
+    interactive: true
     cmds:
       - "{{.RUN_PREFIX}} signalsmith {{.CLI_ARGS}}"
   venv:run:
     desc: Run args in the venv
+    interactive: true
     cmds:
       - "{{.RUN_PREFIX}} {{.CLI_ARGS}}"
   venv:python:
     desc: Run python in the venv
+    interactive: true
     cmds:
       - "{{.RUN_PYTHON}} {{.CLI_ARGS}}"
   _rimraf:
