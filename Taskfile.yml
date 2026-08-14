@@ -13,25 +13,14 @@ vars:
     sh: git -c safe.directory='*' ls-files -- '*.sh'
   MD_FILES:
     sh: git -c safe.directory='*' ls-files -- '*.md' ':!:.opencode/*'
-  # Command bodies shared by a tool's check and fix task. Kept here rather
-  # than having one task call the other because CHECK_RUN_PREFIX embeds
-  # {{.TASK}}, and a delegating task would report the callee's name.
   RUFF_FORMAT: "{{.RUN_PREFIX}} ruff format --config pyproject.toml"
   RUFF_LINT: "{{.RUN_PREFIX}} ruff check --config pyproject.toml"
   YAMLFMT: "mise exec -- yamlfmt"
   SHFMT: "mise exec -- shfmt"
   RUMDL: "mise exec -- rumdl"
-  # Empty outside GitHub Actions, so local runs are unaffected. {{.TASK}}
-  # resolves to the currently-executing task because task injects its
-  # special vars before templating vars like this one. Plain python3, not
-  # RUN_PYTHON/`uv run`, so it works before `uv sync` (see gha-check-run.py).
   CHECK_RUN_PREFIX: >-
     {{if env "GITHUB_ACTIONS"}}{{.PYTHON}} devtools/gha-check-run.py run --data {{(dict "task" .TASK) | mustToJson | q}} --{{end}}
-  # Sequential by default; CI sets this so every tool runs (and so reports
-  # its own check run) even after an earlier one fails. Shared by
-  # validate:static and validate, so it stays global rather than moving into
-  # either task's vars.
-  VALIDATE_PARALLEL: '{{env "VALIDATE_PARALLEL"}}'
+  VALIDATE_PARALLEL: '{{.VALIDATE_PARALLEL | default "false"}}'
 tasks:
   configure:
     desc: Configure this project
@@ -103,12 +92,6 @@ tasks:
     desc: Format YAML
     cmds:
       - "{{.CHECK_RUN_PREFIX}} {{.YAMLFMT}} {{.CLI_ARGS | default .YAML_SOURCE}}"
-  # shfmt/shellcheck/rumdl:*: the file list comes from a var rather than an
-  # inline `files=$(...); if [ -n "$files" ]; then ...; fi` block because
-  # CHECK_RUN_PREFIX can only wrap a single command line; status: skips the
-  # task the same way the old `if` guard did; catLines flattens the
-  # newline-separated file list so it doesn't split the templated command
-  # line into multiple invalid ones.
   shfmt:
     desc: Check shell script formatting
     status:
@@ -178,12 +161,19 @@ tasks:
         mypy codespell ruff:format:check ruff:lint yamlfmt shfmt shellcheck rumdl:format:check rumdl:check
       # Exactly one of these is non-empty. An empty `for` var expands to zero
       # iterations, so the unused branch disappears entirely.
-      STATIC_DEPS: '{{if eq .VALIDATE_PARALLEL "true"}}{{.STATIC_CHECKS}}{{end}}'
-      STATIC_CMDS: '{{if eq .VALIDATE_PARALLEL "true"}}{{else}}{{.STATIC_CHECKS}}{{end}}'
+      STATIC_DEPS: '{{if (mustFromJson .VALIDATE_PARALLEL)}}{{.STATIC_CHECKS}}{{end}}'
+      STATIC_CMDS: '{{if (mustFromJson .VALIDATE_PARALLEL)}}{{else}}{{.STATIC_CHECKS}}{{end}}'
     deps:
       - for: {var: STATIC_DEPS}
         task: "{{.ITEM}}"
     cmds:
+      - cmd: |
+          {{if (mustFromJson .VALIDATE_PARALLEL)}}
+          echo "Ran the '{{.TASK}}' task in parallel..." >&2
+          {{else}}
+          echo "Running the '{{.TASK}}' task sequentially..." >&2
+          {{end}}
+        silent: true
       - for: {var: STATIC_CMDS}
         task: "{{.ITEM}}"
   validate:fix:
@@ -200,12 +190,19 @@ tasks:
     desc: Perform all validation
     vars:
       VALIDATE_TASKS: "validate:static test examples:test"
-      VALIDATE_DEPS: '{{if eq .VALIDATE_PARALLEL "true"}}{{.VALIDATE_TASKS}}{{end}}'
-      VALIDATE_CMDS: '{{if eq .VALIDATE_PARALLEL "true"}}{{else}}{{.VALIDATE_TASKS}}{{end}}'
+      VALIDATE_DEPS: '{{if (mustFromJson .VALIDATE_PARALLEL)}}{{.VALIDATE_TASKS}}{{end}}'
+      VALIDATE_CMDS: '{{if (mustFromJson .VALIDATE_PARALLEL)}}{{else}}{{.VALIDATE_TASKS}}{{end}}'
     deps:
       - for: {var: VALIDATE_DEPS}
         task: "{{.ITEM}}"
     cmds:
+      - cmd: |
+          {{if (mustFromJson .VALIDATE_PARALLEL)}}
+          echo "Ran the '{{.TASK}}' task in parallel..." >&2
+          {{else}}
+          echo "Running the '{{.TASK}}' task sequentially..." >&2
+          {{end}}
+        silent: true
       - for: {var: VALIDATE_CMDS}
         task: "{{.ITEM}}"
   fix-and-validate:

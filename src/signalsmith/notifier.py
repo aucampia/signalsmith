@@ -19,7 +19,7 @@ class RenderedNotification:
 
 
 @cache
-def _get_notifier() -> DesktopNotifierSync:
+def _get_notifier() -> None:
     return DesktopNotifierSync(app_name="signalsmith")
 
 
