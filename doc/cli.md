@@ -134,3 +134,5 @@ stdout for `run`, via logs for `daemon`):
 
 When `X-RateLimit-Remaining` reaches 0 the client sleeps until the
 `X-RateLimit-Reset` Unix timestamp before retrying.
+
+See https://docs.github.com/en/rest/overview/rate-limits-for-the-rest-api for details.
