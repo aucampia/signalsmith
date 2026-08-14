@@ -3,26 +3,44 @@
 # https://go-task.github.io/slim-sprig/
 #
 version: "3"
-# validate:static/validate run tools concurrently (deps: below), so group
-# output keeps each tool's output as one block instead of interleaving them;
-# the ::group:: markers only apply under GitHub Actions since begin/end are
-# templated (unlike the output mode itself).
-output:
-  group:
-    begin: '{{if env "GITHUB_ACTIONS"}}::group::{{.TASK}}{{end}}'
-    end: '{{if env "GITHUB_ACTIONS"}}::endgroup::{{end}}'
 vars:
   PYTHON: python3
   RUN_PREFIX: "uv run"
   RUN_PYTHON: "{{.RUN_PREFIX}} python"
   PY_SOURCE: "src tests devtools"
   YAML_SOURCE: "Taskfile.yml docker-compose.yaml .github/workflows"
+  SH_FILES:
+    sh: git -c safe.directory='*' ls-files -- '*.sh'
+  MD_FILES:
+    sh: git -c safe.directory='*' ls-files -- '*.md' ':!:.opencode/*'
+  # Command bodies shared by a tool's check and fix task. Kept here rather
+  # than having one task call the other because CHECK_RUN_PREFIX embeds
+  # {{.TASK}}, and a delegating task would report the callee's name.
+  RUFF_FORMAT: "{{.RUN_PREFIX}} ruff format --config pyproject.toml"
+  RUFF_LINT: "{{.RUN_PREFIX}} ruff check --config pyproject.toml"
+  YAMLFMT: "mise exec -- yamlfmt"
+  SHFMT: "mise exec -- shfmt"
+  RUMDL: "mise exec -- rumdl"
   # Empty outside GitHub Actions, so local runs are unaffected. {{.TASK}}
   # resolves to the currently-executing task because task injects its
   # special vars before templating vars like this one. Plain python3, not
   # RUN_PYTHON/`uv run`, so it works before `uv sync` (see gha-check-run.py).
   CHECK_RUN_PREFIX: >-
     {{if env "GITHUB_ACTIONS"}}{{.PYTHON}} devtools/gha-check-run.py run --data {{(dict "task" .TASK) | mustToJson | q}} --{{end}}
+  STATIC_CHECKS: >-
+    mypy codespell ruff:format:check ruff:lint yamlfmt shfmt shellcheck rumdl:format:check rumdl:check
+  STATIC_FIXES: >-
+    ruff:lint:fix ruff:format:fix yamlfmt:fix shfmt:fix rumdl:format:fix rumdl:check:fix
+  VALIDATE_TASKS: "validate:static test examples:test"
+  # Sequential by default; CI sets this so every tool runs (and so reports
+  # its own check run) even after an earlier one fails.
+  VALIDATE_PARALLEL: '{{env "VALIDATE_PARALLEL"}}'
+  # Exactly one of each pair is non-empty. An empty `for` var expands to zero
+  # iterations, so the unused branch disappears entirely.
+  STATIC_DEPS: '{{if eq .VALIDATE_PARALLEL "true"}}{{.STATIC_CHECKS}}{{end}}'
+  STATIC_CMDS: '{{if eq .VALIDATE_PARALLEL "true"}}{{else}}{{.STATIC_CHECKS}}{{end}}'
+  VALIDATE_DEPS: '{{if eq .VALIDATE_PARALLEL "true"}}{{.VALIDATE_TASKS}}{{end}}'
+  VALIDATE_CMDS: '{{if eq .VALIDATE_PARALLEL "true"}}{{else}}{{.VALIDATE_TASKS}}{{end}}'
 tasks:
   configure:
     desc: Configure this project
@@ -62,14 +80,22 @@ tasks:
             subprocess.run(["uv", "add", "--bounds=major"] + args + pkgs, check=True)
     cmds:
       - uv run python -c "$SCRIPT"
-  ruff:format:
-    desc: Run ruff formatter
+  ruff:format:check:
+    desc: Check Python formatting with ruff
     cmds:
-      - '{{.CHECK_RUN_PREFIX}} {{.RUN_PREFIX}} ruff format --config pyproject.toml {{if (ne (.CHECK | default "false") "false")}}--check --diff {{end}}{{.CLI_ARGS | default .PY_SOURCE}}'
+      - "{{.CHECK_RUN_PREFIX}} {{.RUFF_FORMAT}} --check --diff {{.CLI_ARGS | default .PY_SOURCE}}"
+  ruff:format:fix:
+    desc: Format Python with ruff
+    cmds:
+      - "{{.CHECK_RUN_PREFIX}} {{.RUFF_FORMAT}} {{.CLI_ARGS | default .PY_SOURCE}}"
   ruff:lint:
     desc: Run ruff linter
     cmds:
-      - '{{.CHECK_RUN_PREFIX}} {{.RUN_PREFIX}} ruff check --config pyproject.toml {{if (mustFromJson (.FIX | default "false"))}}--fix-only {{end}}{{.CLI_ARGS | default .PY_SOURCE}}'
+      - "{{.CHECK_RUN_PREFIX}} {{.RUFF_LINT}} {{.CLI_ARGS | default .PY_SOURCE}}"
+  ruff:lint:fix:
+    desc: Run ruff linter with autofix
+    cmds:
+      - "{{.CHECK_RUN_PREFIX}} {{.RUFF_LINT}} --fix-only {{.CLI_ARGS | default .PY_SOURCE}}"
   mypy:
     desc: Run mypy
     cmds:
@@ -79,51 +105,61 @@ tasks:
     cmds:
       - "{{.CHECK_RUN_PREFIX}} {{.RUN_PREFIX}} codespell {{.CLI_ARGS | default .PY_SOURCE}}"
   yamlfmt:
-    desc: Run yamlfmt
+    desc: Check YAML formatting
     cmds:
-      - '{{.CHECK_RUN_PREFIX}} mise exec -- yamlfmt {{if (ne (.CHECK | default "false") "false")}}-lint {{end}}{{.CLI_ARGS | default .YAML_SOURCE}}'
-  # shfmt/shellcheck/rumdl:*: file discovery moved to a dynamic var (was an
-  # inline `files=$(...); if [ -n "$files" ]; then ...; fi` block) because
+      - "{{.CHECK_RUN_PREFIX}} {{.YAMLFMT}} -lint {{.CLI_ARGS | default .YAML_SOURCE}}"
+  yamlfmt:fix:
+    desc: Format YAML
+    cmds:
+      - "{{.CHECK_RUN_PREFIX}} {{.YAMLFMT}} {{.CLI_ARGS | default .YAML_SOURCE}}"
+  # shfmt/shellcheck/rumdl:*: the file list comes from a var rather than an
+  # inline `files=$(...); if [ -n "$files" ]; then ...; fi` block because
   # CHECK_RUN_PREFIX can only wrap a single command line; status: skips the
   # task the same way the old `if` guard did; catLines flattens the
   # newline-separated file list so it doesn't split the templated command
   # line into multiple invalid ones.
   shfmt:
-    desc: Run shfmt (shell script formatter)
-    vars:
-      SH_FILES:
-        sh: git -c safe.directory='*' ls-files -- '*.sh'
+    desc: Check shell script formatting
     status:
       - '[ -z "{{.SH_FILES | trim}}" ]'
     cmds:
-      - '{{.CHECK_RUN_PREFIX}} mise exec -- shfmt {{if (ne (.CHECK | default "false") "false")}}-l -d{{else}}-w{{end}} {{.SH_FILES | catLines}}'
+      - "{{.CHECK_RUN_PREFIX}} {{.SHFMT}} -l -d {{.SH_FILES | catLines}}"
+  shfmt:fix:
+    desc: Format shell scripts
+    status:
+      - '[ -z "{{.SH_FILES | trim}}" ]'
+    cmds:
+      - "{{.CHECK_RUN_PREFIX}} {{.SHFMT}} -w {{.SH_FILES | catLines}}"
   shellcheck:
     desc: Run shellcheck
-    vars:
-      SH_FILES:
-        sh: git -c safe.directory='*' ls-files -- '*.sh'
     status:
       - '[ -z "{{.SH_FILES | trim}}" ]'
     cmds:
       - "{{.CHECK_RUN_PREFIX}} mise exec -- shellcheck {{.SH_FILES | catLines}}"
   rumdl:check:
     desc: Run rumdl markdown linter
-    vars:
-      MD_FILES:
-        sh: git -c safe.directory='*' ls-files -- '*.md' ':!:.opencode/*'
     status:
       - '[ -z "{{.MD_FILES | trim}}" ]'
     cmds:
-      - '{{.CHECK_RUN_PREFIX}} mise exec -- rumdl check {{if (ne (.FIX | default "false") "false")}}--fix {{end}}{{.MD_FILES | catLines}}'
-  rumdl:format:
-    desc: Run rumdl markdown formatter
-    vars:
-      MD_FILES:
-        sh: git -c safe.directory='*' ls-files -- '*.md' ':!:.opencode/*'
+      - "{{.CHECK_RUN_PREFIX}} {{.RUMDL}} check {{.MD_FILES | catLines}}"
+  rumdl:check:fix:
+    desc: Run rumdl markdown linter with autofix
     status:
       - '[ -z "{{.MD_FILES | trim}}" ]'
     cmds:
-      - '{{.CHECK_RUN_PREFIX}} mise exec -- rumdl fmt {{if (ne (.CHECK | default "false") "false")}}--check {{end}}{{.MD_FILES | catLines}}'
+      - "{{.CHECK_RUN_PREFIX}} {{.RUMDL}} check --fix {{.MD_FILES | catLines}}"
+  rumdl:format:check:
+    desc: Check markdown formatting with rumdl
+    status:
+      - '[ -z "{{.MD_FILES | trim}}" ]'
+    cmds:
+      - "{{.CHECK_RUN_PREFIX}} {{.RUMDL}} fmt --check {{.MD_FILES | catLines}}"
+  rumdl:format:fix:
+    desc: Format markdown with rumdl
+    status:
+      - '[ -z "{{.MD_FILES | trim}}" ]'
+    cmds:
+      - "{{.CHECK_RUN_PREFIX}} {{.RUMDL}} fmt {{.MD_FILES | catLines}}"
   license:fetch:
     desc: Fetch the canonical CC0-1.0 license text into LICENSE
     cmds:
@@ -146,37 +182,27 @@ tasks:
       - "{{.CHECK_RUN_PREFIX}} {{.RUN_PREFIX}} signalsmith test"
   validate:static:
     desc: Perform static validation
-    # deps: run concurrently, and a failing one doesn't stop the others
-    # (task only cancels siblings when failfast is set, which isn't here).
     deps:
-      - mypy
-      - codespell
-      - task: ruff:format
-        vars: {CHECK: "true"}
-      - ruff:lint
-      - task: yamlfmt
-        vars: {CHECK: "true"}
-      - task: shfmt
-        vars: {CHECK: "true"}
-      - shellcheck
-      - task: rumdl:format
-        vars: {CHECK: "true"}
-      - rumdl:check
-      # - pip-audit
+      - for: {var: STATIC_DEPS}
+        task: "{{.ITEM}}"
+    cmds:
+      - for: {var: STATIC_CMDS}
+        task: "{{.ITEM}}"
   validate:fix:
     desc: Fix auto-fixable validation errors.
+    # Always sequential - fixer order matters (ruff:lint:fix before
+    # ruff:format:fix, rumdl:format:fix before rumdl:check:fix).
     cmds:
-      - task: ruff:lint
-        vars: {FIX: "true"}
-      - task: ruff:format
-      - task: yamlfmt
-      - task: shfmt
-      - task: rumdl:format
-      - task: rumdl:check
-        vars: {FIX: "true"}
+      - for: {var: STATIC_FIXES}
+        task: "{{.ITEM}}"
   validate:
     desc: Perform all validation
-    deps: ['validate:static', test, 'examples:test']
+    deps:
+      - for: {var: VALIDATE_DEPS}
+        task: "{{.ITEM}}"
+    cmds:
+      - for: {var: VALIDATE_CMDS}
+        task: "{{.ITEM}}"
   fix-and-validate:
     desc: Perform all validation
     cmds:
@@ -234,4 +260,4 @@ tasks:
             sys.stderr.write(f"removing {path}\n")
             shutil.rmtree(path, ignore_errors=True)
         ' {{.RIMRAF_TARGET}}
-# 
+#

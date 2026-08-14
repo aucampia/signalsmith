@@ -135,9 +135,11 @@ Run these commands in order:
    - `shfmt` / `shellcheck` - Shell script formatting and linting
    - `rumdl` - Markdown formatting and linting
 
-   The tools run concurrently (via go-task `deps:`) and every tool always
-   runs to completion, so one failing tool does not hide failures in the
-   others - the command exits non-zero if any of them failed.
+   Tools run sequentially and stop at the first failure, same as any other
+   `task` command. Setting `VALIDATE_PARALLEL=true` (what CI does) instead
+   fans them out via go-task `deps:`, running every tool to completion
+   regardless of earlier failures - useful when you want to see every
+   problem in one pass, at the cost of interleaved/buffered output.
 
 3. **Run tests:**
 
@@ -154,8 +156,9 @@ Run these commands in order:
    ```
 
    Runs `validate:static`, `test`, and `examples:test` (which runs
-   `signalsmith test` against `examples/config.yaml`) concurrently - it does
-   *not* run `validate:fix`. Use `task fix-and-validate` to run all of them
+   `signalsmith test` against `examples/config.yaml`) - sequentially by
+   default, or concurrently with `VALIDATE_PARALLEL=true`. Does *not* run
+   `validate:fix`. Use `task fix-and-validate` to run all of them
    (`validate:fix`, then `validate`) in sequence.
 
 ### Running the CLI Locally

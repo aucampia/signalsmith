@@ -46,12 +46,13 @@ auto-dismisses what you don't care about, and alerts only on what matters.
 - `task configure` — Install dependencies (mise-managed tools + uv deps)
 - `task validate:fix` — Auto-fix formatting and linting
 - `task validate:static` — Type checking, linting (mypy, ruff, codespell,
-  yamlfmt, shfmt, shellcheck, rumdl) — tools run concurrently and every tool
-  runs to completion, so a failure in one does not hide failures in the rest
+  yamlfmt, shfmt, shellcheck, rumdl) — sequential and stops at the first
+  failure by default; `VALIDATE_PARALLEL=true` (what CI sets) fans tools out
+  via `deps:` instead, running every tool to completion
 - `task test` — Run pytest with coverage
-- `task validate` — static checks + test + examples:test, run concurrently
-  (does *not* run `validate:fix`; use `task fix-and-validate` for fix +
-  validate)
+- `task validate` — static checks + test + examples:test, sequential unless
+  `VALIDATE_PARALLEL=true` (does *not* run `validate:fix`; use
+  `task fix-and-validate` for fix + validate)
 
 ## Best Practices and Communication
 

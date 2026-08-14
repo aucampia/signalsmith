@@ -29,6 +29,10 @@ services:
       - GITHUB_RUN_ID
       - GITHUB_RUN_ATTEMPT
       - GHA_CHECK_HEAD_SHA
+      # See Taskfile.yml's VALIDATE_PARALLEL var - CI sets this so
+      # validate:static/validate fan out via `deps:` instead of running
+      # sequentially.
+      - VALIDATE_PARALLEL
       # `.mise.toml`'s [settings] table needs mise's config-trust step, which
       # there's no interactive prompt for here (no custom entrypoint to run
       # `mise trust` first) - this is mise's own sanctioned non-interactive

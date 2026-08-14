@@ -44,12 +44,20 @@ jobs:
       - name: Run validation
         run: |
           set -x -Eeuo pipefail
-          docker compose --progress quiet run --rm devtools task configure validate
+          docker compose --progress quiet run --rm devtools \
+            task --output group \
+                 --output-group-begin '::group::{{.TASK}}' \
+                 --output-group-end '::endgroup::' \
+                 configure validate
         env:
           # mise needs this for GitHub API calls (tool version resolution,
           # uv's artifact attestation check) or it hits the unauthenticated
           # rate limit almost immediately; gha-check-run.py needs it too.
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          # Locally `task validate` runs sequentially so a broken tool is
+          # obvious from live output; CI sets this so every tool still runs
+          # (and reports its own check run) after an earlier one fails.
+          VALIDATE_PARALLEL: "true"
       - name: Fix workspace ownership
         # if: always() so this (and the state file the next step reads)
         # aren't skipped when validation fails.
