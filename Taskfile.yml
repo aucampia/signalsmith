@@ -8,6 +8,11 @@ vars:
   RUN_PREFIX: "uv run"
   RUN_PYTHON: "{{.RUN_PREFIX}} python"
   PY_SOURCE: "src tests devtools"
+  # ruff's formatter is Python-only (silently no-ops on pyproject.toml), but
+  # `ruff check` also lints ruff's own [tool.ruff] config section (e.g.
+  # rule-codes-in-selectors), so pyproject.toml is only added to the lint
+  # source list, not PY_SOURCE (which format/codespell also use).
+  RUFF_LINT_SOURCE: "{{.PY_SOURCE}} pyproject.toml"
   YAML_SOURCE: "Taskfile.yml docker-compose.yaml .github/workflows"
   SH_FILES:
     sh: git -c safe.directory='*' ls-files -- '*.sh'
@@ -77,11 +82,11 @@ tasks:
   ruff:lint:
     desc: Run ruff linter
     cmds:
-      - "{{.CHECK_RUN_PREFIX}} {{.RUFF_LINT}} {{.CLI_ARGS | default .PY_SOURCE}}"
+      - "{{.CHECK_RUN_PREFIX}} {{.RUFF_LINT}} {{.CLI_ARGS | default .RUFF_LINT_SOURCE}}"
   ruff:lint:fix:
     desc: Run ruff linter with autofix
     cmds:
-      - "{{.CHECK_RUN_PREFIX}} {{.RUFF_LINT}} --fix-only {{.CLI_ARGS | default .PY_SOURCE}}"
+      - "{{.CHECK_RUN_PREFIX}} {{.RUFF_LINT}} --fix-only {{.CLI_ARGS | default .RUFF_LINT_SOURCE}}"
   mypy:
     desc: Run mypy
     cmds:
