@@ -27,20 +27,11 @@ vars:
   # RUN_PYTHON/`uv run`, so it works before `uv sync` (see gha-check-run.py).
   CHECK_RUN_PREFIX: >-
     {{if env "GITHUB_ACTIONS"}}{{.PYTHON}} devtools/gha-check-run.py run --data {{(dict "task" .TASK) | mustToJson | q}} --{{end}}
-  STATIC_CHECKS: >-
-    mypy codespell ruff:format:check ruff:lint yamlfmt shfmt shellcheck rumdl:format:check rumdl:check
-  STATIC_FIXES: >-
-    ruff:lint:fix ruff:format:fix yamlfmt:fix shfmt:fix rumdl:format:fix rumdl:check:fix
-  VALIDATE_TASKS: "validate:static test examples:test"
   # Sequential by default; CI sets this so every tool runs (and so reports
-  # its own check run) even after an earlier one fails.
+  # its own check run) even after an earlier one fails. Shared by
+  # validate:static and validate, so it stays global rather than moving into
+  # either task's vars.
   VALIDATE_PARALLEL: '{{env "VALIDATE_PARALLEL"}}'
-  # Exactly one of each pair is non-empty. An empty `for` var expands to zero
-  # iterations, so the unused branch disappears entirely.
-  STATIC_DEPS: '{{if eq .VALIDATE_PARALLEL "true"}}{{.STATIC_CHECKS}}{{end}}'
-  STATIC_CMDS: '{{if eq .VALIDATE_PARALLEL "true"}}{{else}}{{.STATIC_CHECKS}}{{end}}'
-  VALIDATE_DEPS: '{{if eq .VALIDATE_PARALLEL "true"}}{{.VALIDATE_TASKS}}{{end}}'
-  VALIDATE_CMDS: '{{if eq .VALIDATE_PARALLEL "true"}}{{else}}{{.VALIDATE_TASKS}}{{end}}'
 tasks:
   configure:
     desc: Configure this project
@@ -182,6 +173,13 @@ tasks:
       - "{{.CHECK_RUN_PREFIX}} {{.RUN_PREFIX}} signalsmith test"
   validate:static:
     desc: Perform static validation
+    vars:
+      STATIC_CHECKS: >-
+        mypy codespell ruff:format:check ruff:lint yamlfmt shfmt shellcheck rumdl:format:check rumdl:check
+      # Exactly one of these is non-empty. An empty `for` var expands to zero
+      # iterations, so the unused branch disappears entirely.
+      STATIC_DEPS: '{{if eq .VALIDATE_PARALLEL "true"}}{{.STATIC_CHECKS}}{{end}}'
+      STATIC_CMDS: '{{if eq .VALIDATE_PARALLEL "true"}}{{else}}{{.STATIC_CHECKS}}{{end}}'
     deps:
       - for: {var: STATIC_DEPS}
         task: "{{.ITEM}}"
@@ -192,11 +190,18 @@ tasks:
     desc: Fix auto-fixable validation errors.
     # Always sequential - fixer order matters (ruff:lint:fix before
     # ruff:format:fix, rumdl:format:fix before rumdl:check:fix).
+    vars:
+      STATIC_FIXES: >-
+        ruff:lint:fix ruff:format:fix yamlfmt:fix shfmt:fix rumdl:format:fix rumdl:check:fix
     cmds:
       - for: {var: STATIC_FIXES}
         task: "{{.ITEM}}"
   validate:
     desc: Perform all validation
+    vars:
+      VALIDATE_TASKS: "validate:static test examples:test"
+      VALIDATE_DEPS: '{{if eq .VALIDATE_PARALLEL "true"}}{{.VALIDATE_TASKS}}{{end}}'
+      VALIDATE_CMDS: '{{if eq .VALIDATE_PARALLEL "true"}}{{else}}{{.VALIDATE_TASKS}}{{end}}'
     deps:
       - for: {var: VALIDATE_DEPS}
         task: "{{.ITEM}}"
