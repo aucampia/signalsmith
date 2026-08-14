@@ -92,9 +92,9 @@ signalsmith/
    task configure
    ```
 
-   This runs `mise install` (fetches the pinned versions of `task`,
-   `yamlfmt`, `shfmt`, `shellcheck`, and `uv` from `.mise.toml`) and then
-   `uv sync` to install Python dependencies including dev tools.
+   This runs `mise install` (fetches the pinned tool versions from
+   `.mise.toml`) and then `uv sync` to install Python dependencies including
+   dev tools.
 
    Alternatively, run everything in the containerized devtools environment
    (also what CI uses) without installing `mise`/`uv` locally:
@@ -127,13 +127,8 @@ Run these commands in order:
    task validate:static
    ```
 
-   This runs:
-   - `mypy` - Type checking (strict mode)
-   - `ruff check` / `ruff format --check` - Linting and formatting
-   - `codespell` - Spell checking
-   - `yamlfmt` - YAML formatting (CI/infra files only)
-   - `shfmt` / `shellcheck` - Shell script formatting and linting
-   - `rumdl` - Markdown formatting and linting
+   This runs mypy plus the project's linters/formatters (see Taskfile.yml's
+   `STATIC_CHECKS` var for the current list).
 
    Tools run sequentially and stop at the first failure, same as any other
    `task` command. Setting `VALIDATE_PARALLEL=true` (what CI does) instead
@@ -233,11 +228,11 @@ failed instead of just the overall `Validate / validate` job — see
 - **Package manager:** uv (fast Python package installer)
 - **Build backend:** hatchling
 - **Task runner:** go-task (Taskfile.yml)
-- **Tool version pinning:** mise (`.mise.toml`) for `task`, `yamlfmt`,
-  `shfmt`, `shellcheck`, `uv`, `rumdl`
+- **Tool version pinning:** mise (`.mise.toml`)
 - **CLI framework:** Typer
 - **Data validation:** Pydantic v2, via `pydantic.dataclasses.dataclass` (not
   `BaseModel` — see AGENTS.md for the narrow exception and why)
 - **Testing:** pytest + pytest-cov
 - **Type checking:** mypy (strict mode)
-- **Linting/formatting:** ruff, yamlfmt, shfmt, shellcheck
+- **Linting/formatting:** ruff, plus the tools in Taskfile.yml's
+  `STATIC_CHECKS` var
