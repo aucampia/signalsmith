@@ -22,7 +22,9 @@ services:
       - GITHUB_RUN_ID
       - GITHUB_RUN_ATTEMPT
       - GHA_CHECK_HEAD_SHA
+      - GITHUB_REF
       - VALIDATE_PARALLEL
+      - OUTPUT_SARIF
       - MISE_TRUSTED_CONFIG_PATHS=/srv/workspace
       - XDG_CACHE_HOME=/srv/__devtools/cache
       - UV_CACHE_DIR=/srv/__devtools/cache/uv

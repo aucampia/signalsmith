@@ -15,12 +15,19 @@ repository, and head sha available (see `Env.reporting_enabled`) - outside
 that (locally, or on a fork PR with a read-only token) `run` just executes
 the command and returns its exit code unchanged. GHA_CHECK_DRY_RUN=1 stubs
 the GitHub API calls (logs what would have been sent instead), for testing.
+
+`run --output-is-sarif` additionally treats the command's stdout as a SARIF
+document: the check run's text is a summary of its results instead of raw
+log lines, and (when reporting is enabled) it is uploaded to the Code
+Scanning API - see Taskfile.yml's `zizmor` task and `OUTPUT_SARIF` var.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import collections
+import gzip
 import json
 import os
 import subprocess
@@ -55,6 +62,7 @@ class Env:
     run_id: str | None
     run_attempt: str | None
     head_sha: str | None
+    ref: str | None
     state_path: Path
     dry_run: bool
 
@@ -69,6 +77,7 @@ class Env:
             run_id=os.environ.get("GITHUB_RUN_ID") or None,
             run_attempt=os.environ.get("GITHUB_RUN_ATTEMPT") or None,
             head_sha=os.environ.get("GHA_CHECK_HEAD_SHA") or None,
+            ref=os.environ.get("GITHUB_REF") or None,
             state_path=Path(os.environ.get("GHA_CHECK_STATE", _DEFAULT_STATE_PATH)),
             dry_run=os.environ.get("GHA_CHECK_DRY_RUN", "") not in ("", "0", "false"),
         )
@@ -87,12 +96,22 @@ def _details_url(env: Env) -> str | None:
 
 
 def _api_call(
-    env: Env, method: str, path: str, payload: dict[str, Any]
+    env: Env,
+    method: str,
+    path: str,
+    payload: dict[str, Any],
+    *,
+    log_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """POST/PATCH to the GitHub Checks API, or (dry-run) log it and return None."""
+    """POST/PATCH to the GitHub API, or (dry-run) log it and return None.
+
+    `log_payload`, when given, is logged instead of `payload` in dry-run mode
+    - lets callers redact large fields (e.g. a base64 SARIF blob) from logs.
+    """
     url = f"{env.api_url}/repos/{env.repository}{path}"
     if env.dry_run:
-        _notify(f"DRY RUN: would {method} {url}\n  payload: {payload!r}")
+        shown = payload if log_payload is None else log_payload
+        _notify(f"DRY RUN: would {method} {url}\n  payload: {shown!r}")
         return None
     request = urllib.request.Request(
         url, data=json.dumps(payload).encode(), method=method
@@ -173,7 +192,57 @@ def _run_passthrough(command: Sequence[str]) -> int:
     return subprocess.run(command, check=False).returncode
 
 
-def _run_reported(env: Env, name: str, command: Sequence[str]) -> int:
+def _summarize_sarif(text: str, *, max_results: int = 50) -> str | None:
+    """Render SARIF `results` as short human-readable lines, or None if `text` isn't SARIF."""
+    try:
+        doc = json.loads(text)
+        results = [r for run in doc["runs"] for r in run.get("results", [])]
+    except json.JSONDecodeError, KeyError, TypeError:
+        return None
+    if not results:
+        return "No SARIF results."
+    lines = []
+    for result in results[:max_results]:
+        rule = result.get("ruleId", "?")
+        level = result.get("level", "warning")
+        message = result.get("message", {}).get("text", "")
+        location = ""
+        for loc in result.get("locations") or []:
+            physical = loc.get("physicalLocation", {})
+            uri = physical.get("artifactLocation", {}).get("uri", "")
+            region = physical.get("region", {})
+            start_line = region.get("startLine") or region.get("endLine")
+            location = f"{uri}:{start_line}" if start_line else uri
+            break
+        lines.append(f"- [{level}] {rule} ({location}): {message}")
+    if len(results) > max_results:
+        lines.append(f"... and {len(results) - max_results} more")
+    return "\n".join(lines)
+
+
+def _upload_sarif(env: Env, name: str, sarif_text: str, started_at: str) -> None:
+    """Best-effort upload to the Code Scanning API. Never raises."""
+    sarif_b64 = base64.b64encode(gzip.compress(sarif_text.encode())).decode()
+    payload: dict[str, Any] = {
+        "commit_sha": env.head_sha,
+        "ref": env.ref,
+        "sarif": sarif_b64,
+        "tool_name": name,
+        "category": name,
+        "started_at": started_at,
+    }
+    log_payload = {**payload, "sarif": f"<{len(sarif_b64)} chars>"}
+    try:
+        _api_call(
+            env, "POST", "/code-scanning/sarifs", payload, log_payload=log_payload
+        )
+    except (urllib.error.URLError, OSError) as exc:
+        _warn(f"could not upload SARIF for {name!r}: {exc}")
+
+
+def _run_reported(
+    env: Env, name: str, command: Sequence[str], *, output_is_sarif: bool = False
+) -> int:
     # check_run_id is None in dry-run mode, so it can't double as the key
     # finalize pairs start/complete records by (every task would collide on
     # None) - run_key is a separate identity just for that.
@@ -197,20 +266,36 @@ def _run_reported(env: Env, name: str, command: Sequence[str]) -> int:
     )
 
     tail: collections.deque[str] = collections.deque(maxlen=_LOG_TAIL_LINES)
+    full_lines: list[str] = []
     start = time.monotonic()
+    # SARIF mode keeps stderr separate (a tool's INFO/warning logs on stderr
+    # would otherwise corrupt the captured stdout as a JSON document) and
+    # buffers every line (a truncated tail would be invalid SARIF to upload).
     process = subprocess.Popen(
-        command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1
+        command,
+        stdout=subprocess.PIPE,
+        stderr=None if output_is_sarif else subprocess.STDOUT,
+        text=True,
+        bufsize=1,
     )
     if process.stdout is None:
         raise RuntimeError("subprocess stdout was not piped")
     for line in process.stdout:
         sys.stdout.write(line)
         tail.append(line)
+        if output_is_sarif:
+            full_lines.append(line)
     exit_code = process.wait()
     duration = time.monotonic() - start
     completed_at = _now_iso()
 
     conclusion = "success" if exit_code == 0 else "failure"
+    log_tail = _tail(tail)
+    if output_is_sarif:
+        full_text = "".join(full_lines)
+        log_tail = _summarize_sarif(full_text) or log_tail
+        if env.reporting_enabled():
+            _upload_sarif(env, name, full_text, started_at)
     try:
         _complete_check_run(
             env,
@@ -219,7 +304,7 @@ def _run_reported(env: Env, name: str, command: Sequence[str]) -> int:
             conclusion=conclusion,
             completed_at=completed_at,
             exit_code=exit_code,
-            log_tail=_tail(tail),
+            log_tail=log_tail,
         )
     except (urllib.error.URLError, OSError) as exc:
         _warn(f"could not update check run for {name!r}: {exc}")
@@ -256,7 +341,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     env = Env.from_os_environ()
     if not env.reporting_enabled():
         return _run_passthrough(command)
-    return _run_reported(env, name, command)
+    return _run_reported(env, name, command, output_is_sarif=args.output_is_sarif)
 
 
 def cmd_finalize(args: argparse.Namespace) -> int:
@@ -334,6 +419,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar="JSON",
         help='JSON object merged into the check run\'s metadata (e.g. \'{"task": "mypy"}\'); repeatable',
+    )
+    run_parser.add_argument(
+        "--output-is-sarif",
+        action="store_true",
+        help=(
+            "treat the command's stdout as a SARIF document: derive the check "
+            "run's text from it instead of raw log lines, and upload it to "
+            "the Code Scanning API when reporting is enabled"
+        ),
     )
     run_parser.add_argument(
         "command",

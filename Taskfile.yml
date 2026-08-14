@@ -32,6 +32,7 @@ vars:
   CHECK_RUN_PREFIX: >-
     {{if env "GITHUB_ACTIONS"}}{{.PYTHON}} devtools/gha-check-run.py run --data {{(dict "task" .TASK) | mustToJson | q}} --{{end}}
   VALIDATE_PARALLEL: '{{.VALIDATE_PARALLEL | default "false"}}'
+  OUTPUT_SARIF: '{{.OUTPUT_SARIF | default "false"}}'
 tasks:
   configure:
     desc: Configure this project
@@ -147,8 +148,17 @@ tasks:
       - "{{.CHECK_RUN_PREFIX}} {{.RUMDL}} fmt {{.MD_FILES | catLines}}"
   zizmor:
     desc: Run zizmor (GitHub Actions security linter)
+    vars:
+      # OUTPUT_SARIF switches this task to a SARIF-only invocation (no plain
+      # diagnostics) so gha-check-run.py can upload results to Code
+      # Scanning. --output-is-sarif has to be a `run` flag (before the `--`
+      # command separator), which CHECK_RUN_PREFIX has no per-task hook for,
+      # so this task builds its own prefix instead of reusing it.
+      ZIZMOR_FORMAT: '{{if (mustFromJson .OUTPUT_SARIF)}}--format sarif{{end}}'
+      ZIZMOR_SARIF_FLAG: '{{if (mustFromJson .OUTPUT_SARIF)}}--output-is-sarif{{end}}'
     cmds:
-      - "{{.CHECK_RUN_PREFIX}} {{.ZIZMOR}} .github/workflows"
+      - >-
+        {{if env "GITHUB_ACTIONS"}}{{.PYTHON}} devtools/gha-check-run.py run --data {{(dict "task" .TASK) | mustToJson | q}} {{.ZIZMOR_SARIF_FLAG}} --{{end}} {{.ZIZMOR}} {{.ZIZMOR_FORMAT}} .github/workflows
   zizmor:fix:
     desc: Run zizmor with autofix
     cmds:

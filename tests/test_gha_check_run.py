@@ -10,6 +10,7 @@ calls, so these tests never hit the network.
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -153,6 +154,83 @@ def test_run_streams_command_output(tmp_path: Path) -> None:
         cwd=tmp_path,
     )
     assert "hi" in result.stdout
+
+
+def test_run_output_is_sarif_summarizes_and_uploads(tmp_path: Path) -> None:
+    env = _reporting_env(tmp_path)
+    sarif = json.dumps(
+        {
+            "runs": [
+                {
+                    "results": [
+                        {
+                            "ruleId": "demo/some-rule",
+                            "level": "warning",
+                            "message": {"text": "oops"},
+                            "locations": [
+                                {
+                                    "physicalLocation": {
+                                        "artifactLocation": {"uri": "a.yml"},
+                                        "region": {"startLine": 3},
+                                    }
+                                }
+                            ],
+                        }
+                    ]
+                }
+            ]
+        }
+    )
+    result = _run(
+        [
+            "run",
+            "--data",
+            '{"task": "zizmor"}',
+            "--output-is-sarif",
+            "--",
+            sys.executable,
+            "-c",
+            f"print({sarif!r})",
+        ],
+        env=env,
+        cwd=tmp_path,
+    )
+    assert result.returncode == 0
+    records = _read_state(tmp_path)
+    assert [r["event"] for r in records] == ["start", "complete"]
+    assert records[1]["conclusion"] == "success"
+    # The check-run text is a summary derived from the SARIF, not raw stdout.
+    assert "demo/some-rule" in result.stderr
+    assert "a.yml:3" in result.stderr
+    # Uploaded to the Code Scanning API, with the sarif field redacted rather
+    # than the full base64 blob dumped into the (dry-run) log.
+    assert "/code-scanning/sarifs" in result.stderr
+    assert re.search(r"<\d+ chars>", result.stderr)
+
+
+def test_run_output_is_sarif_with_invalid_json_still_completes(tmp_path: Path) -> None:
+    env = _reporting_env(tmp_path)
+    result = _run(
+        [
+            "run",
+            "--data",
+            '{"task": "zizmor"}',
+            "--output-is-sarif",
+            "--",
+            sys.executable,
+            "-c",
+            "import sys; print('not valid json'); sys.exit(1)",
+        ],
+        env=env,
+        cwd=tmp_path,
+    )
+    assert result.returncode == 1
+    records = _read_state(tmp_path)
+    assert [r["event"] for r in records] == ["start", "complete"]
+    assert records[1]["conclusion"] == "failure"
+    assert records[1]["exit_code"] == 1
+    # Falls back to the raw output as check-run text when SARIF parsing fails.
+    assert "not valid json" in result.stderr
 
 
 def test_two_runs_get_distinct_check_identities(tmp_path: Path) -> None:

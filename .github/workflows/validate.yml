@@ -22,6 +22,9 @@ jobs:
       # that and falls back to running tools with no reporting. Scoped to
       # this job rather than the whole workflow (only job that needs it).
       checks: write # see comment above (zizmor only reads same-line comments)
+      # Lets devtools/gha-check-run.py upload zizmor's SARIF output to Code
+      # Scanning. Same fork-PR degradation as checks: write above.
+      security-events: write # see comment above
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -55,6 +58,7 @@ jobs:
           # rate limit almost immediately; gha-check-run.py needs it too.
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
           VALIDATE_PARALLEL: "true"
+          OUTPUT_SARIF: "true"
       - name: Fix workspace ownership
         if: always()
         run: sudo chown -R "$(id -u):$(id -g)" .
