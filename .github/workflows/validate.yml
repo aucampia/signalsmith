@@ -10,13 +10,18 @@ concurrency:
 env:
   __DEVTOOLS_CACHE_DIR: ${{ github.workspace }}/.cache/devtools
   GHA_CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-permissions:
-  contents: read
-  checks: write
 jobs:
   validate:
+    name: validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      # Lets devtools/gha-check-run.py report per-tool check runs. Not
+      # granted on fork PRs (read-only token there) - the script detects
+      # that and falls back to running tools with no reporting. Scoped to
+      # this job rather than the whole workflow (only job that needs it).
+      checks: write # see comment above (zizmor only reads same-line comments)
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
