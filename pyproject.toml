@@ -89,33 +89,37 @@ select = [
     "ASYNC", # flake8-async
     "B", # flake8-bugbear
     "S", # flake8-bandit
-    "TID251", # flake8-tidy-imports: banned-api only (not TID252/relative-imports)
+    "banned-api", # flake8-tidy-imports: banned-api only (not TID252/relative-imports)
 ]
 
 ignore = [
-    "E501", # line too long:
+    "line-too-long", # line too long:
     # Disabled based on black recommendations
     # https://black.readthedocs.io/en/stable/faq.html#why-are-flake8-s-e203-and-w503-violated
-    "E203", # whitespace before ':'
-    "E231", # missing whitespace after ','
-    "E251", # Unexpected spaces around keyword / parameter equals
+    "whitespace-before-punctuation", # whitespace before ':'
+    "missing-whitespace", # missing whitespace after ','
+    "unexpected-spaces-around-keyword-parameter-equals", # Unexpected spaces around keyword / parameter equals
     # Disabled because this targets Python 3.9 or later
-    "UP007", # Use `X | Y` for type annotations
-    "UP045", # Use `X | None` for type annotations
-    "ANN401", # Dynamically typed expressions (typing.Any) are disallowed in {name}
-    "S101", # Use of assert detected.
-    "S404", # subprocess module is possibly insecure
-    "S607", # Starting a process with a partial executable path
-    "S403", # pickle, cPickle, dill, and shelve modules are possibly insecure
-    "RUF067", # __init__ module should not contain any code
-    "S603",
+    "non-pep604-annotation-union", # Use `X | Y` for type annotations
+    "non-pep604-annotation-optional", # Use `X | None` for type annotations
+    "any-type", # Dynamically typed expressions (typing.Any) are disallowed in {name}
+    "assert", # Use of assert detected.
+    "suspicious-subprocess-import", # subprocess module is possibly insecure
+    "start-process-with-partial-path", # Starting a process with a partial executable path
+    "suspicious-pickle-import", # pickle, cPickle, dill, and shelve modules are possibly insecure
+    "non-empty-init-module", # __init__ module should not contain any code
+    "subprocess-without-shell-equals-true",
 ]
 
 [tool.ruff.lint.per-file-ignores]
 # GitHubUser/GitHubLabel/GitHubTeam/GitHubIssue/GitHubPullRequest need
 # BaseModel's extra="allow" dump support (see comment in github/models.py) -
 # pydantic dataclasses silently drop extra fields on serialization.
-"src/signalsmith/github/models.py" = ["TID251"]
+"src/signalsmith/github/models.py" = ["banned-api"]
+# Talks to the GitHub API via urllib (stdlib-only, see module docstring) -
+# the URL is always https://<GITHUB_API_URL>/repos/<GITHUB_REPOSITORY>/..., a
+# fixed scheme built from trusted CI-provided env vars.
+"devtools/gha-check-run.py" = ["suspicious-url-open-usage"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "pydantic.BaseModel".msg = "Use pydantic.dataclasses.dataclass instead (see AGENTS.md)."
@@ -139,7 +143,7 @@ asyncio_mode = "auto"
 
 [tool.mypy]
 # https://mypy.readthedocs.io/en/stable/config_file.html
-files = "src,tests"
+files = "src,tests,devtools"
 mypy_path = "src:tests"
 python_version = "3.14"
 strict = true

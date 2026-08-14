@@ -1,14 +1,43 @@
 # https://taskfile.dev/usage/
 # https://pkg.go.dev/text/template
 # https://go-task.github.io/slim-sprig/
-# 
+#
 version: "3"
 vars:
   PYTHON: python3
   RUN_PREFIX: "uv run"
   RUN_PYTHON: "{{.RUN_PREFIX}} python"
-  PY_SOURCE: "src tests"
+  PY_SOURCE: "src tests devtools"
+  # ruff's formatter is Python-only (silently no-ops on pyproject.toml), but
+  # `ruff check` also lints ruff's own [tool.ruff] config section (e.g.
+  # rule-codes-in-selectors), so pyproject.toml is only added to the lint
+  # source list, not PY_SOURCE (which format/codespell also use).
+  RUFF_LINT_SOURCE: "{{.PY_SOURCE}} pyproject.toml"
   YAML_SOURCE: "Taskfile.yml docker-compose.yaml .github/workflows"
+  SH_FILES:
+    sh: git -c safe.directory='*' ls-files -- '*.sh'
+  MD_FILES:
+    sh: git -c safe.directory='*' ls-files -- '*.md' ':!:.opencode/*'
+  RUFF_FORMAT: "{{.RUN_PREFIX}} ruff format --config pyproject.toml"
+  RUFF_LINT: "{{.RUN_PREFIX}} ruff check --config pyproject.toml"
+  YAMLFMT: "mise exec -- yamlfmt"
+  SHFMT: "mise exec -- shfmt"
+  RUMDL: "mise exec -- rumdl"
+  # env -u: zizmor requires GH_TOKEN/GITHUB_TOKEN/ZIZMOR_GITHUB_TOKEN to be
+  # either unset or non-empty - an empty-but-set value errors outright, even
+  # with --offline (which never uses it). --offline never needs a token, so
+  # the three are unset unconditionally rather than only when empty.
+  ZIZMOR: >-
+    env -u GH_TOKEN -u GITHUB_TOKEN -u ZIZMOR_GITHUB_TOKEN mise exec -- zizmor --persona pedantic --min-severity informational --min-confidence high --offline
+  CHECK_RUN_PREFIX: >-
+    {{if env "GITHUB_ACTIONS"}}{{.PYTHON}} devtools/gha-check-run.py run --data {{(dict "task" .TASK) | mustToJson | q}} --{{end}}
+  # Same as CHECK_RUN_PREFIX, but tells gha-check-run.py the wrapped command's
+  # stdout is a SARIF document (for upload to Code Scanning) rather than plain
+  # log text - see the zizmor task.
+  CHECK_RUN_PREFIX_SARIF: >-
+    {{if env "GITHUB_ACTIONS"}}{{.PYTHON}} devtools/gha-check-run.py run --data {{(dict "task" .TASK) | mustToJson | q}} --output-is-sarif --{{end}}
+  VALIDATE_PARALLEL: '{{.VALIDATE_PARALLEL | default "false"}}'
+  OUTPUT_SARIF: '{{.OUTPUT_SARIF | default "false"}}'
 tasks:
   configure:
     desc: Configure this project
@@ -48,58 +77,109 @@ tasks:
             subprocess.run(["uv", "add", "--bounds=major"] + args + pkgs, check=True)
     cmds:
       - uv run python -c "$SCRIPT"
-  ruff:format:
-    desc: Run ruff formatter
+  ruff:format:check:
+    desc: Check Python formatting with ruff
     cmds:
-      - '{{.RUN_PREFIX}} ruff format --config pyproject.toml {{if (ne (.CHECK | default "false") "false")}}--check --diff {{end}}{{.CLI_ARGS | default .PY_SOURCE}}'
+      - "{{.CHECK_RUN_PREFIX}} {{.RUFF_FORMAT}} --check --diff {{.CLI_ARGS | default .PY_SOURCE}}"
+  ruff:format:fix:
+    desc: Format Python with ruff
+    cmds:
+      - "{{.CHECK_RUN_PREFIX}} {{.RUFF_FORMAT}} {{.CLI_ARGS | default .PY_SOURCE}}"
   ruff:lint:
     desc: Run ruff linter
+    vars:
+      # OUTPUT_SARIF switches this task to a SARIF-only invocation (no plain
+      # diagnostics) so gha-check-run.py can upload results to Code Scanning
+      # - same pattern as the zizmor task.
+      RUFF_LINT_FORMAT: '{{if (mustFromJson .OUTPUT_SARIF)}}--output-format sarif{{end}}'
+      RUFF_LINT_PREFIX: '{{if (mustFromJson .OUTPUT_SARIF)}}{{.CHECK_RUN_PREFIX_SARIF}}{{else}}{{.CHECK_RUN_PREFIX}}{{end}}'
     cmds:
-      - '{{.RUN_PREFIX}} ruff check --config pyproject.toml {{if (mustFromJson (.FIX | default "false"))}}--fix-only {{end}}{{.CLI_ARGS | default .PY_SOURCE}}'
+      - "{{.RUFF_LINT_PREFIX}} {{.RUFF_LINT}} {{.RUFF_LINT_FORMAT}} {{.CLI_ARGS | default .RUFF_LINT_SOURCE}}"
+  ruff:lint:fix:
+    desc: Run ruff linter with autofix
+    cmds:
+      - "{{.CHECK_RUN_PREFIX}} {{.RUFF_LINT}} --fix-only {{.CLI_ARGS | default .RUFF_LINT_SOURCE}}"
   mypy:
     desc: Run mypy
     cmds:
-      - "{{.RUN_PYTHON}} -m mypy --show-error-context --show-error-codes {{.CLI_ARGS}}"
+      - "{{.CHECK_RUN_PREFIX}} {{.RUN_PYTHON}} -m mypy --show-error-context --show-error-codes {{.CLI_ARGS}}"
   codespell:
     desc: Run codespell
     cmds:
-      - "{{.RUN_PREFIX}} codespell {{.CLI_ARGS | default .PY_SOURCE}}"
+      - "{{.CHECK_RUN_PREFIX}} {{.RUN_PREFIX}} codespell {{.CLI_ARGS | default .PY_SOURCE}}"
   yamlfmt:
-    desc: Run yamlfmt
+    desc: Check YAML formatting
     cmds:
-      - 'mise exec -- yamlfmt {{if (ne (.CHECK | default "false") "false")}}-lint {{end}}{{.CLI_ARGS | default .YAML_SOURCE}}'
+      - "{{.CHECK_RUN_PREFIX}} {{.YAMLFMT}} -lint {{.CLI_ARGS | default .YAML_SOURCE}}"
+  yamlfmt:fix:
+    desc: Format YAML
+    cmds:
+      - "{{.CHECK_RUN_PREFIX}} {{.YAMLFMT}} {{.CLI_ARGS | default .YAML_SOURCE}}"
   shfmt:
-    desc: Run shfmt (shell script formatter)
+    desc: Check shell script formatting
+    status:
+      - '[ -z "{{.SH_FILES | trim}}" ]'
     cmds:
-      - |
-        files=$(git -c safe.directory='*' ls-files -- '*.sh')
-        if [ -n "$files" ]; then
-          mise exec -- shfmt {{if (ne (.CHECK | default "false") "false")}}-l -d{{else}}-w{{end}} $files
-        fi
+      - "{{.CHECK_RUN_PREFIX}} {{.SHFMT}} -l -d {{.SH_FILES | catLines}}"
+  shfmt:fix:
+    desc: Format shell scripts
+    status:
+      - '[ -z "{{.SH_FILES | trim}}" ]'
+    cmds:
+      - "{{.CHECK_RUN_PREFIX}} {{.SHFMT}} -w {{.SH_FILES | catLines}}"
   shellcheck:
     desc: Run shellcheck
+    status:
+      - '[ -z "{{.SH_FILES | trim}}" ]'
     cmds:
-      - |
-        files=$(git -c safe.directory='*' ls-files -- '*.sh')
-        if [ -n "$files" ]; then
-          mise exec -- shellcheck $files
-        fi
+      - "{{.CHECK_RUN_PREFIX}} mise exec -- shellcheck {{.SH_FILES | catLines}}"
   rumdl:check:
     desc: Run rumdl markdown linter
+    status:
+      - '[ -z "{{.MD_FILES | trim}}" ]'
+    vars:
+      # OUTPUT_SARIF switches this task to a SARIF-only invocation (no plain
+      # diagnostics) so gha-check-run.py can upload results to Code Scanning
+      # - same pattern as the zizmor task.
+      RUMDL_CHECK_FORMAT: '{{if (mustFromJson .OUTPUT_SARIF)}}--output-format sarif{{end}}'
+      RUMDL_CHECK_PREFIX: '{{if (mustFromJson .OUTPUT_SARIF)}}{{.CHECK_RUN_PREFIX_SARIF}}{{else}}{{.CHECK_RUN_PREFIX}}{{end}}'
     cmds:
-      - |
-        files=$(git -c safe.directory='*' ls-files -- '*.md' ':!:.opencode/*')
-        if [ -n "$files" ]; then
-          mise exec -- rumdl check {{if (ne (.FIX | default "false") "false")}}--fix {{end}}$files
-        fi
-  rumdl:format:
-    desc: Run rumdl markdown formatter
+      - "{{.RUMDL_CHECK_PREFIX}} {{.RUMDL}} check {{.RUMDL_CHECK_FORMAT}} {{.MD_FILES | catLines}}"
+  rumdl:check:fix:
+    desc: Run rumdl markdown linter with autofix
+    status:
+      - '[ -z "{{.MD_FILES | trim}}" ]'
     cmds:
-      - |
-        files=$(git -c safe.directory='*' ls-files -- '*.md' ':!:.opencode/*')
-        if [ -n "$files" ]; then
-          mise exec -- rumdl fmt {{if (ne (.CHECK | default "false") "false")}}--check {{end}}$files
-        fi
+      - "{{.CHECK_RUN_PREFIX}} {{.RUMDL}} check --fix {{.MD_FILES | catLines}}"
+  rumdl:format:check:
+    desc: Check markdown formatting with rumdl
+    status:
+      - '[ -z "{{.MD_FILES | trim}}" ]'
+    cmds:
+      - "{{.CHECK_RUN_PREFIX}} {{.RUMDL}} fmt --check {{.MD_FILES | catLines}}"
+  rumdl:format:fix:
+    desc: Format markdown with rumdl
+    status:
+      - '[ -z "{{.MD_FILES | trim}}" ]'
+    cmds:
+      - "{{.CHECK_RUN_PREFIX}} {{.RUMDL}} fmt {{.MD_FILES | catLines}}"
+  zizmor:
+    desc: Run zizmor (GitHub Actions security linter)
+    vars:
+      # OUTPUT_SARIF switches this task to a SARIF-only invocation (no plain
+      # diagnostics) so gha-check-run.py can upload results to Code Scanning.
+      ZIZMOR_FORMAT: '{{if (mustFromJson .OUTPUT_SARIF)}}--format sarif{{end}}'
+      ZIZMOR_PREFIX: '{{if (mustFromJson .OUTPUT_SARIF)}}{{.CHECK_RUN_PREFIX_SARIF}}{{else}}{{.CHECK_RUN_PREFIX}}{{end}}'
+    cmds:
+      - "{{.ZIZMOR_PREFIX}} {{.ZIZMOR}} {{.ZIZMOR_FORMAT}} .github/workflows"
+  zizmor:fix:
+    desc: Run zizmor with autofix
+    cmds:
+      - "{{.CHECK_RUN_PREFIX}} {{.ZIZMOR}} --fix .github/workflows"
+  actionlint:
+    desc: Run actionlint (GitHub Actions workflow linter)
+    cmds:
+      - "{{.CHECK_RUN_PREFIX}} mise exec -- actionlint {{.CLI_ARGS}}"
   license:fetch:
     desc: Fetch the canonical CC0-1.0 license text into LICENSE
     cmds:
@@ -113,47 +193,64 @@ tasks:
   test:
     desc: Run tests
     cmds:
-      - "{{.RUN_PYTHON}} -m pytest {{.CLI_ARGS}}"
+      - "{{.CHECK_RUN_PREFIX}} {{.RUN_PYTHON}} -m pytest {{.CLI_ARGS}}"
   examples:test:
     desc: Run example config tests via CLI
     env:
       SIGNALSMITH_CONFIG_DIR: examples
     cmds:
-      - "{{.RUN_PREFIX}} signalsmith test"
+      - "{{.CHECK_RUN_PREFIX}} {{.RUN_PREFIX}} signalsmith test"
   validate:static:
     desc: Perform static validation
+    vars:
+      STATIC_CHECKS: >-
+        mypy codespell ruff:format:check ruff:lint yamlfmt shfmt shellcheck rumdl:format:check rumdl:check zizmor actionlint
+      # Exactly one of these is non-empty. An empty `for` var expands to zero
+      # iterations, so the unused branch disappears entirely.
+      STATIC_DEPS: '{{if (mustFromJson .VALIDATE_PARALLEL)}}{{.STATIC_CHECKS}}{{end}}'
+      STATIC_CMDS: '{{if (mustFromJson .VALIDATE_PARALLEL)}}{{else}}{{.STATIC_CHECKS}}{{end}}'
+    deps:
+      - for: {var: STATIC_DEPS}
+        task: "{{.ITEM}}"
     cmds:
-      - task: mypy
-      - task: codespell
-      - task: ruff:format
-        vars: {CHECK: "true"}
-      - task: ruff:lint
-      - task: yamlfmt
-        vars: {CHECK: "true"}
-      - task: shfmt
-        vars: {CHECK: "true"}
-      - task: shellcheck
-      - task: rumdl:format
-        vars: {CHECK: "true"}
-      - task: rumdl:check
-        # - task: pip-audit
+      - cmd: |
+          {{if (mustFromJson .VALIDATE_PARALLEL)}}
+          echo "Ran the '{{.TASK}}' task in parallel..." >&2
+          {{else}}
+          echo "Running the '{{.TASK}}' task sequentially..." >&2
+          {{end}}
+        silent: true
+      - for: {var: STATIC_CMDS}
+        task: "{{.ITEM}}"
   validate:fix:
     desc: Fix auto-fixable validation errors.
+    # Always sequential - fixer order matters (ruff:lint:fix before
+    # ruff:format:fix, rumdl:format:fix before rumdl:check:fix).
+    vars:
+      STATIC_FIXES: >-
+        ruff:lint:fix ruff:format:fix yamlfmt:fix shfmt:fix rumdl:format:fix rumdl:check:fix zizmor:fix
     cmds:
-      - task: ruff:lint
-        vars: {FIX: "true"}
-      - task: ruff:format
-      - task: yamlfmt
-      - task: shfmt
-      - task: rumdl:format
-      - task: rumdl:check
-        vars: {FIX: "true"}
+      - for: {var: STATIC_FIXES}
+        task: "{{.ITEM}}"
   validate:
     desc: Perform all validation
+    vars:
+      VALIDATE_TASKS: "validate:static test examples:test"
+      VALIDATE_DEPS: '{{if (mustFromJson .VALIDATE_PARALLEL)}}{{.VALIDATE_TASKS}}{{end}}'
+      VALIDATE_CMDS: '{{if (mustFromJson .VALIDATE_PARALLEL)}}{{else}}{{.VALIDATE_TASKS}}{{end}}'
+    deps:
+      - for: {var: VALIDATE_DEPS}
+        task: "{{.ITEM}}"
     cmds:
-      - task: validate:static
-      - task: test
-      - task: examples:test
+      - cmd: |
+          {{if (mustFromJson .VALIDATE_PARALLEL)}}
+          echo "Ran the '{{.TASK}}' task in parallel..." >&2
+          {{else}}
+          echo "Running the '{{.TASK}}' task sequentially..." >&2
+          {{end}}
+        silent: true
+      - for: {var: VALIDATE_CMDS}
+        task: "{{.ITEM}}"
   fix-and-validate:
     desc: Perform all validation
     cmds:
@@ -179,18 +276,22 @@ tasks:
       - task: validate
   uv:
     desc: Run uv
+    interactive: true
     cmds:
       - "uv {{.CLI_ARGS}}"
   cli:
     desc: Run cli
+    interactive: true
     cmds:
       - "{{.RUN_PREFIX}} signalsmith {{.CLI_ARGS}}"
   venv:run:
     desc: Run args in the venv
+    interactive: true
     cmds:
       - "{{.RUN_PREFIX}} {{.CLI_ARGS}}"
   venv:python:
     desc: Run python in the venv
+    interactive: true
     cmds:
       - "{{.RUN_PYTHON}} {{.CLI_ARGS}}"
   _rimraf:
@@ -207,4 +308,4 @@ tasks:
             sys.stderr.write(f"removing {path}\n")
             shutil.rmtree(path, ignore_errors=True)
         ' {{.RIMRAF_TARGET}}
-# 
+#

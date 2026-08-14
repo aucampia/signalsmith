@@ -1,13 +1,6 @@
 # https://docs.docker.com/reference/compose-file/
 # https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/
 services:
-  # No custom image - all pinned tools (task, yamlfmt, shfmt, shellcheck, uv)
-  # come from .mise.toml and are fetched on demand by `mise exec` on first
-  # use. Python itself comes from the image's own baked-in global mise
-  # config (which declares a default `python`), not from .mise.toml - `uv`
-  # is happy to use whatever interpreter mise puts on PATH as long as it
-  # satisfies requires-python. Revisit a custom image if we ever need to
-  # bake something in that mise/uv can't provide at run-time.
   devtools:
     image: ghcr.io/jdx/mise:2026.8.3@sha256:92dbc3f2573926d8974e4641ad8449f16c323130b9f41c39aff19b7b2f500ef6
     entrypoint: ["mise", "exec", "--"]
@@ -20,21 +13,22 @@ services:
       # GitHub API calls (tool version resolution, uv's artifact attestation
       # check) or it quickly hits the unauthenticated rate limit.
       - GITHUB_TOKEN
-      # `.mise.toml`'s [settings] table needs mise's config-trust step, which
-      # there's no interactive prompt for here (no custom entrypoint to run
-      # `mise trust` first) - this is mise's own sanctioned non-interactive
-      # equivalent. Must be an env var, not project config: mise ignores
-      # trust-control settings from non-global project files for security.
+      # Passed through so devtools/gha-check-run.py (see Taskfile.yml's
+      # CHECK_RUN_PREFIX) can report each leaf task as its own check run.
+      - GITHUB_ACTIONS
+      - GITHUB_REPOSITORY
+      - GITHUB_API_URL
+      - GITHUB_SERVER_URL
+      - GITHUB_RUN_ID
+      - GITHUB_RUN_ATTEMPT
+      - GHA_CHECK_HEAD_SHA
+      - GITHUB_REF
+      - VALIDATE_PARALLEL
+      - OUTPUT_SARIF
       - MISE_TRUSTED_CONFIG_PATHS=/srv/workspace
-      # Everything cacheable lives under one root (mounted as a volume
-      # below). Each tool is pointed at it explicitly rather than relying on
-      # XDG resolution - XDG_CACHE_HOME is set too as a catch-all, but
-      # nothing here actually depends on it.
       - XDG_CACHE_HOME=/srv/__devtools/cache
       - UV_CACHE_DIR=/srv/__devtools/cache/uv
       - UV_PYTHON_INSTALL_DIR=/srv/__devtools/cache/uv/python
-      # This image bakes MISE_DATA_DIR=/mise, MISE_CACHE_DIR=/mise/cache,
-      # which beats XDG - override explicitly or nothing gets cached.
       - MISE_DATA_DIR=/srv/__devtools/cache/mise/data
       - MISE_CACHE_DIR=/srv/__devtools/cache/mise/cache
       - RUFF_CACHE_DIR=/srv/__devtools/cache/ruff

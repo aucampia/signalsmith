@@ -9,12 +9,22 @@ concurrency:
   cancel-in-progress: true
 env:
   __DEVTOOLS_CACHE_DIR: ${{ github.workspace }}/.cache/devtools
-permissions:
-  contents: read
+  GHA_CHECK_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 jobs:
   validate:
+    name: validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      # Lets devtools/gha-check-run.py report per-tool check runs. Not
+      # granted on fork PRs (read-only token there) - the script detects
+      # that and falls back to running tools with no reporting. Scoped to
+      # this job rather than the whole workflow (only job that needs it).
+      checks: write # see comment above (zizmor only reads same-line comments)
+      # Lets devtools/gha-check-run.py upload zizmor's SARIF output to Code
+      # Scanning. Same fork-PR degradation as checks: write above.
+      security-events: write # see comment above
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -37,10 +47,23 @@ jobs:
       - name: Run validation
         run: |
           set -x -Eeuo pipefail
-          docker compose --progress quiet run --rm devtools task configure validate
-          sudo chown -R "$(id -u):$(id -g)" .
+          docker compose --progress quiet run --rm devtools \
+            task --output group \
+                 --output-group-begin '::group::{{.TASK}}' \
+                 --output-group-end '::endgroup::' \
+                 configure validate
         env:
           # mise needs this for GitHub API calls (tool version resolution,
           # uv's artifact attestation check) or it hits the unauthenticated
-          # rate limit almost immediately.
+          # rate limit almost immediately; gha-check-run.py needs it too.
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          VALIDATE_PARALLEL: "true"
+          OUTPUT_SARIF: "true"
+      - name: Fix workspace ownership
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" .
+      - name: Report check results
+        if: always()
+        run: python3 ./devtools/gha-check-run.py finalize
+        env:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"

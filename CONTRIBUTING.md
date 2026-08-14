@@ -92,9 +92,9 @@ signalsmith/
    task configure
    ```
 
-   This runs `mise install` (fetches the pinned versions of `task`,
-   `yamlfmt`, `shfmt`, `shellcheck`, and `uv` from `.mise.toml`) and then
-   `uv sync` to install Python dependencies including dev tools.
+   This runs `mise install` (fetches the pinned tool versions from
+   `.mise.toml`) and then `uv sync` to install Python dependencies including
+   dev tools.
 
    Alternatively, run everything in the containerized devtools environment
    (also what CI uses) without installing `mise`/`uv` locally:
@@ -127,12 +127,14 @@ Run these commands in order:
    task validate:static
    ```
 
-   This runs:
-   - `mypy` - Type checking (strict mode)
-   - `ruff check` - Linting
-   - `codespell` - Spell checking
-   - `yamlfmt` - YAML formatting (CI/infra files only)
-   - `shfmt` / `shellcheck` - Shell script formatting and linting
+   This runs mypy plus the project's linters/formatters (see Taskfile.yml's
+   `STATIC_CHECKS` var for the current list).
+
+   Tools run sequentially and stop at the first failure, same as any other
+   `task` command. Setting `VALIDATE_PARALLEL=true` (what CI does) instead
+   fans them out via go-task `deps:`, running every tool to completion
+   regardless of earlier failures - useful when you want to see every
+   problem in one pass, at the cost of interleaved/buffered output.
 
 3. **Run tests:**
 
@@ -148,9 +150,11 @@ Run these commands in order:
    task validate
    ```
 
-   Runs `validate:static` then `test` - it does *not* run `validate:fix`.
-   Use `task fix-and-validate` to run all three (`validate:fix`,
-   `validate:static`, `test`) in sequence.
+   Runs `validate:static`, `test`, and `examples:test` (which runs
+   `signalsmith test` against `examples/config.yaml`) - sequentially by
+   default, or concurrently with `VALIDATE_PARALLEL=true`. Does *not* run
+   `validate:fix`. Use `task fix-and-validate` to run all of them
+   (`validate:fix`, then `validate`) in sequence.
 
 ### Running the CLI Locally
 
@@ -213,16 +217,22 @@ workflow (`.github/workflows/validate.yml`), which runs `task configure
 validate` inside the `devtools` container (see `docker-compose.yaml`) — the
 same command described in the Validation Workflow section above.
 
+Each tool in `validate:static`/`validate` also reports its own GitHub check
+run (`mypy`, `ruff:lint`, `test`, etc.), so a PR shows which specific tool
+failed instead of just the overall `Validate / validate` job — see
+`devtools/gha-check-run.py`, wired in via `Taskfile.yml`'s
+`CHECK_RUN_PREFIX`. This has no effect on local `task` runs.
+
 ## Project Tooling
 
 - **Package manager:** uv (fast Python package installer)
 - **Build backend:** hatchling
 - **Task runner:** go-task (Taskfile.yml)
-- **Tool version pinning:** mise (`.mise.toml`) for `task`, `yamlfmt`,
-  `shfmt`, `shellcheck`, `uv`
+- **Tool version pinning:** mise (`.mise.toml`)
 - **CLI framework:** Typer
 - **Data validation:** Pydantic v2, via `pydantic.dataclasses.dataclass` (not
   `BaseModel` — see AGENTS.md for the narrow exception and why)
 - **Testing:** pytest + pytest-cov
 - **Type checking:** mypy (strict mode)
-- **Linting/formatting:** ruff, yamlfmt, shfmt, shellcheck
+- **Linting/formatting:** ruff, plus the tools in Taskfile.yml's
+  `STATIC_CHECKS` var

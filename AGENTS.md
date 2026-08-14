@@ -23,8 +23,8 @@ auto-dismisses what you don't care about, and alerts only on what matters.
 
 - `uv` for dependency management
 - `task` as task runner (see Taskfile.yml)
-- `mise` (`.mise.toml`) pins the non-Python CLI tools `task` itself relies
-  on plus `uv`: `task`, `yamlfmt`, `shfmt`, `shellcheck`, `uv`. `task
+- `mise` (`.mise.toml`) pins the non-Python CLI tools `task` and
+  `validate:static` rely on (linters/formatters), plus `uv` itself. `task
   configure` runs `mise install` before `uv sync`. `mise.lock` (kept
   up to date automatically, `[settings] lockfile = true`) additionally pins
   the exact checksum/URL per tool+platform, on top of the exact versions
@@ -35,17 +35,24 @@ auto-dismisses what you don't care about, and alerts only on what matters.
   which installs whatever `.mise.toml` declares on demand
   (`docker compose run --rm devtools task configure validate`) — used by CI
   (`.github/workflows/validate.yml`) and optionally by contributors who
-  don't want to install `mise`/`uv` locally.
+  don't want to install `mise`/`uv` locally. In CI, each `validate:static`/
+  `validate` leaf task also reports its own GitHub check run via
+  `devtools/gha-check-run.py` (wired in through `Taskfile.yml`'s
+  `CHECK_RUN_PREFIX`), so a PR shows which specific tool failed; this has no
+  effect on local `task` runs.
 
 ## Quick Commands
 
 - `task configure` — Install dependencies (mise-managed tools + uv deps)
 - `task validate:fix` — Auto-fix formatting and linting
-- `task validate:static` — Type checking, linting (mypy, ruff, codespell,
-  yamlfmt, shfmt, shellcheck)
+- `task validate:static` — Type checking and linting (see Taskfile.yml's
+  `STATIC_CHECKS` var for the current tool list) — sequential and stops at
+  the first failure by default; `VALIDATE_PARALLEL=true` (what CI sets) fans
+  tools out via `deps:` instead, running every tool to completion
 - `task test` — Run pytest with coverage
-- `task validate` — static checks + test (does *not* run `validate:fix`; use
-  `task fix-and-validate` for fix + static + test)
+- `task validate` — static checks + test + examples:test, sequential unless
+  `VALIDATE_PARALLEL=true` (does *not* run `validate:fix`; use
+  `task fix-and-validate` for fix + validate)
 
 ## Best Practices and Communication
 
