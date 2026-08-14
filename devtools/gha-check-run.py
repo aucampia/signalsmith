@@ -152,10 +152,12 @@ def _append_state(env: Env, record: dict[str, Any]) -> None:
 
     validate:static tasks run concurrently (Taskfile `deps:` fan-out under
     VALIDATE_PARALLEL), so multiple gha-check-run.py processes append here at
-    once. A single os.write() of a small buffer relies on POSIX's O_APPEND
-    atomicity guarantee (writes under PIPE_BUF interleave, not corrupt) - a
-    buffered text-mode file object doesn't guarantee its flush produces
-    exactly one write() syscall, so it doesn't get that guarantee.
+    once. A single os.write() relies on the OS guarantee that one write()
+    syscall to a file opened with O_APPEND won't interleave with another
+    process's write() to the same file - a local-filesystem property, not a
+    PIPE_BUF-style size cap (PIPE_BUF is specific to pipes/FIFOs, not regular
+    files). A buffered text-mode file object doesn't get this guarantee,
+    since its flush isn't guaranteed to happen as a single write() syscall.
     """
     env.state_path.parent.mkdir(parents=True, exist_ok=True)
     data = (json.dumps(record) + "\n").encode()
