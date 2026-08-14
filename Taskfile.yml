@@ -31,6 +31,11 @@ vars:
     env -u GH_TOKEN -u GITHUB_TOKEN -u ZIZMOR_GITHUB_TOKEN mise exec -- zizmor --persona pedantic --min-severity informational --min-confidence high --offline
   CHECK_RUN_PREFIX: >-
     {{if env "GITHUB_ACTIONS"}}{{.PYTHON}} devtools/gha-check-run.py run --data {{(dict "task" .TASK) | mustToJson | q}} --{{end}}
+  # Same as CHECK_RUN_PREFIX, but tells gha-check-run.py the wrapped command's
+  # stdout is a SARIF document (for upload to Code Scanning) rather than plain
+  # log text - see the zizmor task.
+  CHECK_RUN_PREFIX_SARIF: >-
+    {{if env "GITHUB_ACTIONS"}}{{.PYTHON}} devtools/gha-check-run.py run --data {{(dict "task" .TASK) | mustToJson | q}} --output-is-sarif --{{end}}
   VALIDATE_PARALLEL: '{{.VALIDATE_PARALLEL | default "false"}}'
   OUTPUT_SARIF: '{{.OUTPUT_SARIF | default "false"}}'
 tasks:
@@ -150,15 +155,11 @@ tasks:
     desc: Run zizmor (GitHub Actions security linter)
     vars:
       # OUTPUT_SARIF switches this task to a SARIF-only invocation (no plain
-      # diagnostics) so gha-check-run.py can upload results to Code
-      # Scanning. --output-is-sarif has to be a `run` flag (before the `--`
-      # command separator), which CHECK_RUN_PREFIX has no per-task hook for,
-      # so this task builds its own prefix instead of reusing it.
+      # diagnostics) so gha-check-run.py can upload results to Code Scanning.
       ZIZMOR_FORMAT: '{{if (mustFromJson .OUTPUT_SARIF)}}--format sarif{{end}}'
-      ZIZMOR_SARIF_FLAG: '{{if (mustFromJson .OUTPUT_SARIF)}}--output-is-sarif{{end}}'
+      ZIZMOR_PREFIX: '{{if (mustFromJson .OUTPUT_SARIF)}}{{.CHECK_RUN_PREFIX_SARIF}}{{else}}{{.CHECK_RUN_PREFIX}}{{end}}'
     cmds:
-      - >-
-        {{if env "GITHUB_ACTIONS"}}{{.PYTHON}} devtools/gha-check-run.py run --data {{(dict "task" .TASK) | mustToJson | q}} {{.ZIZMOR_SARIF_FLAG}} --{{end}} {{.ZIZMOR}} {{.ZIZMOR_FORMAT}} .github/workflows
+      - "{{.ZIZMOR_PREFIX}} {{.ZIZMOR}} {{.ZIZMOR_FORMAT}} .github/workflows"
   zizmor:fix:
     desc: Run zizmor with autofix
     cmds:
