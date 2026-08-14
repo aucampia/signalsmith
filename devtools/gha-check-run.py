@@ -333,7 +333,12 @@ def _run_reported(
     if process.stdout is None:
         raise RuntimeError("subprocess stdout was not piped")
     for line in process.stdout:
-        sys.stdout.write(line)
+        # SARIF mode swallows stdout instead of echoing it - the SARIF
+        # document is consumed here (summarized into the check run, uploaded
+        # to Code Scanning), not meant for a human reading the job log, and
+        # re-emitting a multi-KB JSON blob there is just noise.
+        if not output_is_sarif:
+            sys.stdout.write(line)
         tail.append(line)
         if output_is_sarif:
             full_lines.append(line)
@@ -344,6 +349,9 @@ def _run_reported(
     log_tail = _tail(tail)
     if output_is_sarif:
         full_text = "".join(full_lines)
+        _notify(
+            f"{name}: captured {len(full_text)} byte(s) of SARIF output from stdout"
+        )
         sarif_results = _parse_sarif_results(full_text)
         if sarif_results is not None:
             log_tail = _summarize_sarif_results(sarif_results)
