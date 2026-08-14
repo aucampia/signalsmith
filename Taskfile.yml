@@ -87,8 +87,14 @@ tasks:
       - "{{.CHECK_RUN_PREFIX}} {{.RUFF_FORMAT}} {{.CLI_ARGS | default .PY_SOURCE}}"
   ruff:lint:
     desc: Run ruff linter
+    vars:
+      # OUTPUT_SARIF switches this task to a SARIF-only invocation (no plain
+      # diagnostics) so gha-check-run.py can upload results to Code Scanning
+      # - same pattern as the zizmor task.
+      RUFF_LINT_FORMAT: '{{if (mustFromJson .OUTPUT_SARIF)}}--output-format sarif{{end}}'
+      RUFF_LINT_PREFIX: '{{if (mustFromJson .OUTPUT_SARIF)}}{{.CHECK_RUN_PREFIX_SARIF}}{{else}}{{.CHECK_RUN_PREFIX}}{{end}}'
     cmds:
-      - "{{.CHECK_RUN_PREFIX}} {{.RUFF_LINT}} {{.CLI_ARGS | default .RUFF_LINT_SOURCE}}"
+      - "{{.RUFF_LINT_PREFIX}} {{.RUFF_LINT}} {{.RUFF_LINT_FORMAT}} {{.CLI_ARGS | default .RUFF_LINT_SOURCE}}"
   ruff:lint:fix:
     desc: Run ruff linter with autofix
     cmds:
@@ -131,8 +137,14 @@ tasks:
     desc: Run rumdl markdown linter
     status:
       - '[ -z "{{.MD_FILES | trim}}" ]'
+    vars:
+      # OUTPUT_SARIF switches this task to a SARIF-only invocation (no plain
+      # diagnostics) so gha-check-run.py can upload results to Code Scanning
+      # - same pattern as the zizmor task.
+      RUMDL_CHECK_FORMAT: '{{if (mustFromJson .OUTPUT_SARIF)}}--output-format sarif{{end}}'
+      RUMDL_CHECK_PREFIX: '{{if (mustFromJson .OUTPUT_SARIF)}}{{.CHECK_RUN_PREFIX_SARIF}}{{else}}{{.CHECK_RUN_PREFIX}}{{end}}'
     cmds:
-      - "{{.CHECK_RUN_PREFIX}} {{.RUMDL}} check {{.MD_FILES | catLines}}"
+      - "{{.RUMDL_CHECK_PREFIX}} {{.RUMDL}} check {{.RUMDL_CHECK_FORMAT}} {{.MD_FILES | catLines}}"
   rumdl:check:fix:
     desc: Run rumdl markdown linter with autofix
     status:

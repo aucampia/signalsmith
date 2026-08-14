@@ -19,7 +19,8 @@ the GitHub API calls (logs what would have been sent instead), for testing.
 `run --output-is-sarif` additionally treats the command's stdout as a SARIF
 document: the check run's text is a summary of its results instead of raw
 log lines, and (when reporting is enabled) it is uploaded to the Code
-Scanning API - see Taskfile.yml's `zizmor` task and `OUTPUT_SARIF` var.
+Scanning API - see Taskfile.yml's `zizmor`, `ruff:lint`, and `rumdl:check`
+tasks and `OUTPUT_SARIF` var.
 """
 
 from __future__ import annotations
