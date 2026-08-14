@@ -31,7 +31,6 @@ import collections
 import gzip
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -276,6 +275,7 @@ def _upload_sarif(env: Env, name: str, sarif_text: str, started_at: str) -> None
     }
     log_payload = {**payload, "sarif": f"<{len(sarif_b64)} chars>"}
     try:
+        # https://docs.github.com/en/rest/code-scanning/code-scanning?apiVersion=2026-03-10#upload-an-analysis-as-sarif-data
         response = _api_call(
             env, "POST", "/code-scanning/sarifs", payload, log_payload=log_payload
         )
