@@ -246,20 +246,31 @@ def _summarize_sarif_results(
 
 
 def _upload_sarif(env: Env, name: str, sarif_text: str, started_at: str) -> None:
-    """Best-effort upload to the Code Scanning API. Never raises."""
+    """Best-effort upload to the Code Scanning API. Never raises.
+
+    No "category" field - unlike check-runs/check-suites, the sarifs upload
+    endpoint rejects it outright ("category is not a permitted key"); category
+    is instead read from the SARIF document's own `runs[].automationDetails`
+    if present, not from the request. Confirmed directly against the live API
+    with a real payload after a 422 in production traced back to this.
+    """
     sarif_b64 = base64.b64encode(gzip.compress(sarif_text.encode())).decode()
     payload: dict[str, Any] = {
         "commit_sha": env.head_sha,
         "ref": env.ref,
         "sarif": sarif_b64,
         "tool_name": name,
-        "category": name,
         "started_at": started_at,
     }
     log_payload = {**payload, "sarif": f"<{len(sarif_b64)} chars>"}
     try:
         _api_call(
             env, "POST", "/code-scanning/sarifs", payload, log_payload=log_payload
+        )
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")
+        _warn(
+            f"could not upload SARIF for {name!r}: HTTP {exc.code} {exc.reason}: {detail}"
         )
     except (urllib.error.URLError, OSError) as exc:
         _warn(f"could not upload SARIF for {name!r}: {exc}")
