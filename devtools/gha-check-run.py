@@ -255,6 +255,15 @@ def _upload_sarif(env: Env, name: str, sarif_text: str, started_at: str) -> None
     is instead read from the SARIF document's own `runs[].automationDetails`
     if present, not from the request. Confirmed directly against the live API
     with a real payload after a 422 in production traced back to this.
+
+    `checkout_uri` is the cwd the wrapped tool ran in, as a `file://` URI -
+    some tools (ruff, unlike zizmor/rumdl) emit absolute `file://` paths in
+    their SARIF rather than repo-relative ones; without this, GitHub can't
+    map those to files in the PR diff, so alerts exist under the Security tab
+    but never appear as "Files changed" annotations. Confirmed against a live
+    PR: ruff's alert location was `file:///srv/workspace/...` (the devtools
+    container's workdir, matching `Path.cwd()` here since gha-check-run.py
+    and the wrapped subprocess share a cwd).
     """
     sarif_b64 = base64.b64encode(gzip.compress(sarif_text.encode())).decode()
     payload: dict[str, Any] = {
@@ -263,12 +272,17 @@ def _upload_sarif(env: Env, name: str, sarif_text: str, started_at: str) -> None
         "sarif": sarif_b64,
         "tool_name": name,
         "started_at": started_at,
+        "checkout_uri": Path.cwd().as_uri(),
     }
     log_payload = {**payload, "sarif": f"<{len(sarif_b64)} chars>"}
     try:
-        _api_call(
+        response = _api_call(
             env, "POST", "/code-scanning/sarifs", payload, log_payload=log_payload
         )
+        if response is not None:
+            _notify(
+                f"uploaded SARIF for {name!r}: {response.get('url', '(no url in response)')}"
+            )
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(errors="replace")
         _warn(

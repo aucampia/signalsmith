@@ -214,6 +214,9 @@ def test_run_output_is_sarif_summarizes_and_uploads(tmp_path: Path) -> None:
     # than the full base64 blob dumped into the (dry-run) log.
     assert "/code-scanning/sarifs" in result.stderr
     assert re.search(r"<\d+ chars>", result.stderr)
+    # checkout_uri lets GitHub map a tool's absolute file:// SARIF paths
+    # (ruff does this) back to repo-relative paths in the PR diff.
+    assert f"'checkout_uri': '{tmp_path.as_uri()}'" in result.stderr
 
 
 def test_run_output_is_sarif_rewrites_pull_merge_ref_to_head(tmp_path: Path) -> None:
