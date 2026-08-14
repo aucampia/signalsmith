@@ -23,7 +23,7 @@ vars:
   # with --offline (which never uses it). --offline never needs a token, so
   # the three are unset unconditionally rather than only when empty.
   ZIZMOR: >-
-    env -u GH_TOKEN -u GITHUB_TOKEN -u ZIZMOR_GITHUB_TOKEN mise exec -- zizmor --persona pedantic --min-severity high --min-confidence high --offline
+    env -u GH_TOKEN -u GITHUB_TOKEN -u ZIZMOR_GITHUB_TOKEN mise exec -- zizmor --persona pedantic --min-severity informational --min-confidence high --offline
   CHECK_RUN_PREFIX: >-
     {{if env "GITHUB_ACTIONS"}}{{.PYTHON}} devtools/gha-check-run.py run --data {{(dict "task" .TASK) | mustToJson | q}} --{{end}}
   VALIDATE_PARALLEL: '{{.VALIDATE_PARALLEL | default "false"}}'
