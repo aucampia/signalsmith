@@ -131,6 +131,34 @@ def test_run_records_conclusion_and_propagates_exit_code(
     assert records[1]["exit_code"] == exit_code
 
 
+def test_run_dry_run_env_var_is_case_insensitive(tmp_path: Path) -> None:
+    # A common footgun: GHA_CHECK_DRY_RUN=False (capitalized, as e.g. Python's
+    # str(False) would produce) must still disable dry-run, not enable it by
+    # falling through to the "anything not in ('', '0', 'false') enables it"
+    # branch. GITHUB_API_URL points at an unreachable local port instead of
+    # the real API - dry-run being off is evidenced by a real HTTP attempt
+    # failing fast, not by hitting the network (see module docstring).
+    env = _reporting_env(tmp_path)
+    env["GHA_CHECK_DRY_RUN"] = "False"
+    env["GITHUB_API_URL"] = "http://127.0.0.1:1"
+    result = _run(
+        [
+            "run",
+            "--data",
+            '{"task": "demo"}',
+            "--",
+            sys.executable,
+            "-c",
+            "print('hi')",
+        ],
+        env=env,
+        cwd=tmp_path,
+    )
+    assert "DRY RUN" not in result.stderr
+    assert result.returncode == 0
+    assert "hi" in result.stdout
+
+
 def test_run_uses_first_command_word_as_name_when_no_data(tmp_path: Path) -> None:
     env = _reporting_env(tmp_path)
     _run(["run", "--", "true"], env=env, cwd=tmp_path)
@@ -313,6 +341,40 @@ def test_two_runs_get_distinct_check_identities(tmp_path: Path) -> None:
     assert len({r["run_key"] for r in starts}) == 2
 
 
+def test_append_state_survives_concurrent_writers(tmp_path: Path) -> None:
+    # validate:static tasks run concurrently under VALIDATE_PARALLEL, so
+    # multiple gha-check-run.py processes append to the same state file at
+    # once - every line must still parse as valid JSON afterward (no
+    # interleaved/corrupted writes).
+    env = _reporting_env(tmp_path)
+    task_count = 16
+    procs = [
+        subprocess.Popen(
+            [
+                sys.executable,
+                str(_SCRIPT),
+                "run",
+                "--data",
+                f'{{"task": "t{i}"}}',
+                "--",
+                sys.executable,
+                "-c",
+                "pass",
+            ],
+            env=env,
+            cwd=tmp_path,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        for i in range(task_count)
+    ]
+    for proc in procs:
+        assert proc.wait() == 0
+    records = _read_state(tmp_path)  # raises if any line fails to parse
+    assert len(records) == 2 * task_count
+    assert {r["event"] for r in records} == {"start", "complete"}
+
+
 # ---------------------------------------------------------------------------
 # finalize
 # ---------------------------------------------------------------------------
@@ -367,6 +429,40 @@ def test_finalize_reports_dangling_start_as_cancelled(tmp_path: Path) -> None:
     result = _run(["finalize"], env=env, cwd=tmp_path)
     assert result.returncode == 0
     assert "orphaned-tool: cancelled" in result.stdout
+
+
+def test_finalize_skips_malformed_state_lines(tmp_path: Path) -> None:
+    # A killed job or a filesystem without atomic-append guarantees can leave
+    # a truncated/corrupt line - finalize must skip it, not crash the
+    # always() reporting step over one bad line.
+    env = _reporting_env(tmp_path)
+    state_path = tmp_path / "state.jsonl"
+    good_start = json.dumps(
+        {
+            "event": "start",
+            "run_key": "a",
+            "check_run_id": 1,
+            "name": "a",
+            "started_at": "2026-01-01T00:00:00Z",
+        }
+    )
+    good_complete = json.dumps(
+        {
+            "event": "complete",
+            "run_key": "a",
+            "check_run_id": 1,
+            "name": "a",
+            "conclusion": "success",
+            "exit_code": 0,
+            "duration_s": 0.1,
+            "completed_at": "2026-01-01T00:00:01Z",
+        }
+    )
+    state_path.write_text(f"{good_start}\nnot valid json\n{good_complete}\n")
+    result = _run(["finalize"], env=env, cwd=tmp_path)
+    assert result.returncode == 0
+    assert "- a: success" in result.stdout
+    assert "skipping malformed state line" in result.stderr
 
 
 def test_finalize_writes_to_step_summary_file(tmp_path: Path) -> None:

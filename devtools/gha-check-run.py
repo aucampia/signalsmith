@@ -93,7 +93,8 @@ class Env:
             head_sha=os.environ.get("GHA_CHECK_HEAD_SHA") or None,
             ref=_sarif_ref(os.environ.get("GITHUB_REF") or None),
             state_path=Path(os.environ.get("GHA_CHECK_STATE", _DEFAULT_STATE_PATH)),
-            dry_run=os.environ.get("GHA_CHECK_DRY_RUN", "") not in ("", "0", "false"),
+            dry_run=os.environ.get("GHA_CHECK_DRY_RUN", "").strip().lower()
+            not in ("", "0", "false"),
         )
 
     def reporting_enabled(self) -> bool:
@@ -147,9 +148,22 @@ def _warn(message: str) -> None:
 
 
 def _append_state(env: Env, record: dict[str, Any]) -> None:
+    """Append one JSON line to the shared state file - safe under concurrent writers.
+
+    validate:static tasks run concurrently (Taskfile `deps:` fan-out under
+    VALIDATE_PARALLEL), so multiple gha-check-run.py processes append here at
+    once. A single os.write() of a small buffer relies on POSIX's O_APPEND
+    atomicity guarantee (writes under PIPE_BUF interleave, not corrupt) - a
+    buffered text-mode file object doesn't guarantee its flush produces
+    exactly one write() syscall, so it doesn't get that guarantee.
+    """
     env.state_path.parent.mkdir(parents=True, exist_ok=True)
-    with env.state_path.open("a") as handle:
-        handle.write(json.dumps(record) + "\n")
+    data = (json.dumps(record) + "\n").encode()
+    fd = os.open(env.state_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+    try:
+        os.write(fd, data)
+    finally:
+        os.close(fd)
 
 
 def _tail(lines: collections.deque[str]) -> str:
@@ -427,12 +441,21 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     for line in env.state_path.read_text().splitlines():
         if not line.strip():
             continue
-        record = json.loads(line)
-        run_key = record["run_key"]
-        if record["event"] == "start":
+        try:
+            record = json.loads(line)
+            run_key = record["run_key"]
+            event = record["event"]
+        except (json.JSONDecodeError, KeyError, TypeError) as exc:
+            # A killed job, or (despite _append_state's atomic write) a
+            # filesystem that doesn't honor O_APPEND atomicity, can still
+            # leave a malformed line - skip it rather than failing the
+            # always() reporting step over one bad line.
+            _warn(f"skipping malformed state line: {exc}")
+            continue
+        if event == "start":
             starts[run_key] = record
             order.append(run_key)
-        elif record["event"] == "complete":
+        elif event == "complete":
             completions[run_key] = record
 
     summary_lines: list[str] = []
