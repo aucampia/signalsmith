@@ -28,6 +28,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Print PR title (demo breakage - intentional zizmor finding)
+        run: echo "Testing PR titled ${{ github.event.pull_request.title }}"
       - name: Cache devtools state (tools, python, lint/test caches)
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
