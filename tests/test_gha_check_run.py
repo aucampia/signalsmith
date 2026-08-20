@@ -8,12 +8,17 @@ Taskfile.yml's CHECK_RUN_PREFIX and .github/workflows/validate.yml's
 calls, so these tests never hit the network.
 """
 
+import contextlib
+import http.server
 import json
 import os
 import re
 import subprocess
 import sys
+import threading
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -477,3 +482,146 @@ def test_finalize_writes_to_step_summary_file(tmp_path: Path) -> None:
     result = _run(["finalize"], env=env, cwd=tmp_path)
     assert result.returncode == 0
     assert "mypy: success" in summary_path.read_text()
+
+
+# ---------------------------------------------------------------------------
+# Failure paths. GHA_CHECK_DRY_RUN can't reach these - it never makes a
+# request, so it can never get a rejection back. These point the script at a
+# stub API on localhost instead, so a fork PR's 403 and a transient 500 are
+# real HTTP responses rather than monkeypatched internals.
+# ---------------------------------------------------------------------------
+
+
+@contextlib.contextmanager
+def _stub_api(
+    respond: Callable[[str, str], tuple[int, dict[str, Any]]],
+) -> Iterator[tuple[str, list[dict[str, Any]]]]:
+    """Serve a stand-in GitHub API, yielding its base URL and the requests it got."""
+    received: list[dict[str, Any]] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def _handle(self) -> None:
+            length = int(self.headers.get("Content-Length") or 0)
+            received.append(
+                {
+                    "method": self.command,
+                    "path": self.path,
+                    "body": json.loads(self.rfile.read(length) or b"{}"),
+                }
+            )
+            status, payload = respond(self.command, self.path)
+            body = json.dumps(payload).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_POST = _handle  # ruff: ignore[mixed-case-variable-in-class-scope]
+        do_PATCH = _handle  # ruff: ignore[mixed-case-variable-in-class-scope]
+
+        def log_message(self, format: str, *args: Any) -> None:
+            """Silence the default stderr access log."""
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}", received
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def _live_env(tmp_path: Path, api_url: str) -> dict[str, str]:
+    """Reporting env that talks to a stub API instead of dry-running."""
+    env = _reporting_env(tmp_path)
+    del env["GHA_CHECK_DRY_RUN"]
+    env["GITHUB_API_URL"] = api_url
+    return env
+
+
+def test_run_fails_on_sarif_findings_when_check_creation_is_forbidden(
+    tmp_path: Path,
+) -> None:
+    """A fork PR's read-only token must not turn findings into a pass.
+
+    Check-run creation 403s there. zizmor exits 0 even when it found
+    something, so if losing the check run also loses the SARIF exit-code
+    derivation, validation passes with findings present.
+    """
+    sarif = _sarif_with_one_result()
+    with _stub_api(
+        lambda method, path: (403, {"message": "Resource not accessible"})
+    ) as (
+        api_url,
+        _received,
+    ):
+        result = _run(
+            [
+                "run",
+                "--data",
+                '{"task": "zizmor"}',
+                "--output-is-sarif",
+                "--",
+                sys.executable,
+                "-c",
+                f"print({sarif!r})",
+            ],
+            env=_live_env(tmp_path, api_url),
+            cwd=tmp_path,
+        )
+    assert result.returncode == 1
+    # Nothing will render the check run, so the findings go to the job log.
+    assert "demo/some-rule" in result.stderr
+    assert "a.yml:3" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("patch_status", "expect_reported", "expect_finalize_retry"),
+    [(500, False, True), (200, True, False)],
+)
+def test_finalize_retries_only_completions_the_api_rejected(
+    tmp_path: Path,
+    patch_status: int,
+    expect_reported: bool,
+    expect_finalize_retry: bool,
+) -> None:
+    """A completion that never landed must be retried, a landed one left alone.
+
+    Without the retry the check run stays `in_progress` for good and blocks
+    the pull request; without the `reported` flag guarding it, finalize would
+    re-PATCH every check run on every job.
+    """
+
+    def respond(method: str, path: str) -> tuple[int, dict[str, Any]]:
+        if method == "POST":
+            return 201, {"id": 4242}
+        return patch_status, {"message": "stub"}
+
+    with _stub_api(respond) as (api_url, _received):
+        run_result = _run(
+            ["run", "--data", '{"task": "mypy"}', "--", sys.executable, "-c", ""],
+            env=_live_env(tmp_path, api_url),
+            cwd=tmp_path,
+        )
+    assert run_result.returncode == 0
+    completion = _read_state(tmp_path)[-1]
+    assert completion["event"] == "complete"
+    assert completion["reported"] is expect_reported
+
+    with _stub_api(lambda method, path: (200, {})) as (api_url, finalize_received):
+        finalize_result = _run(
+            ["finalize"], env=_live_env(tmp_path, api_url), cwd=tmp_path
+        )
+    assert finalize_result.returncode == 0
+
+    if not expect_finalize_retry:
+        assert finalize_received == []
+        return
+    assert [(r["method"], r["path"]) for r in finalize_received] == [
+        ("PATCH", "/repos/example/repo/check-runs/4242")
+    ]
+    assert finalize_received[0]["body"]["status"] == "completed"
+    assert finalize_received[0]["body"]["conclusion"] == "success"
