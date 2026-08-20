@@ -12,9 +12,10 @@ completed, inside the mise devtools container.
 
 Reporting only activates when running under GitHub Actions with a token,
 repository, and head sha available (see `Env.reporting_enabled`) - outside
-that (locally, or on a fork PR with a read-only token) `run` just executes
-the command and returns its exit code unchanged. GHA_CHECK_DRY_RUN=1 stubs
-the GitHub API calls (logs what would have been sent instead), for testing.
+that (locally, or on a fork PR whose read-only token cannot write checks)
+`run` still executes the command and still applies SARIF exit-code
+semantics, it just does not publish anything. GHA_CHECK_DRY_RUN=1 stubs the
+GitHub API calls (logs what would have been sent instead), for testing.
 
 `run --output-is-sarif` additionally treats the command's stdout as a SARIF
 document: the check run's text is a summary of its results instead of raw
@@ -308,31 +309,23 @@ def _upload_sarif(env: Env, name: str, sarif_text: str, started_at: str) -> None
         _warn(f"could not upload SARIF for {name!r}: {exc}")
 
 
-def _run_reported(
-    env: Env, name: str, command: Sequence[str], *, output_is_sarif: bool = False
-) -> int:
-    # check_run_id is None in dry-run mode, so it can't double as the key
-    # finalize pairs start/complete records by (every task would collide on
-    # None) - run_key is a separate identity just for that.
-    run_key = uuid.uuid4().hex
-    started_at = _now_iso()
-    try:
-        check_run_id = _create_check_run(env, name, started_at)
-    except (urllib.error.URLError, OSError) as exc:
-        _notify(f"could not create check run for {name!r} ({exc}); reporting disabled")
-        return _run_passthrough(command)
+@dataclass(frozen=True, kw_only=True)
+class Outcome:
+    exit_code: int
+    log_tail: str
+    sarif_text: str | None
+    duration_s: float
+    completed_at: str
 
-    _append_state(
-        env,
-        {
-            "event": "start",
-            "run_key": run_key,
-            "check_run_id": check_run_id,
-            "name": name,
-            "started_at": started_at,
-        },
-    )
 
+def _execute(name: str, command: Sequence[str], *, output_is_sarif: bool) -> Outcome:
+    """Run `command` and apply SARIF exit-code semantics to the result.
+
+    Deliberately independent of whether check-run reporting is available.
+    Tools that signal findings only through SARIF (zizmor exits 0 regardless)
+    must still fail the build on a fork PR, where the token cannot create
+    check runs - otherwise validation silently passes with findings.
+    """
     tail: collections.deque[str] = collections.deque(maxlen=_LOG_TAIL_LINES)
     full_lines: list[str] = []
     start = time.monotonic()
@@ -363,12 +356,11 @@ def _run_reported(
     completed_at = _now_iso()
 
     log_tail = _tail(tail)
+    sarif_text: str | None = None
     if output_is_sarif:
-        full_text = "".join(full_lines)
-        _notify(
-            f"{name}: captured {len(full_text)} byte(s) of SARIF output from stdout"
-        )
-        sarif_results = _parse_sarif_results(full_text)
+        sarif_text = "".join(full_lines)
+        _notify(f"{name}: captured {len(sarif_text)} byte(s) of SARIF output")
+        sarif_results = _parse_sarif_results(sarif_text)
         if sarif_results is not None:
             log_tail = _summarize_sarif_results(sarif_results)
             # Some SARIF-capable tools (zizmor among them) always exit 0 in
@@ -381,21 +373,80 @@ def _run_reported(
                     "result(s); treating the check run as failed"
                 )
                 exit_code = 1
-        if env.reporting_enabled():
-            _upload_sarif(env, name, full_text, started_at)
-    conclusion = "success" if exit_code == 0 else "failure"
+    return Outcome(
+        exit_code=exit_code,
+        log_tail=log_tail,
+        sarif_text=sarif_text,
+        duration_s=duration,
+        completed_at=completed_at,
+    )
+
+
+def _run_unreported(name: str, command: Sequence[str], *, output_is_sarif: bool) -> int:
+    """Run `command` with no check run to publish to.
+
+    Non-SARIF commands are handed straight through so their stdout/stderr keep
+    their own streams and tty-ness. SARIF commands still have to go through
+    `_execute` for the exit-code derivation, and their findings are echoed to
+    the job log - nothing else is going to render them.
+    """
+    if not output_is_sarif:
+        return _run_passthrough(command)
+    outcome = _execute(name, command, output_is_sarif=True)
+    if outcome.sarif_text is not None:
+        print(f"{name}: {outcome.log_tail}", file=sys.stderr)
+    return outcome.exit_code
+
+
+def _run_reported(
+    env: Env, name: str, command: Sequence[str], *, output_is_sarif: bool = False
+) -> int:
+    # check_run_id is None in dry-run mode, so it can't double as the key
+    # finalize pairs start/complete records by (every task would collide on
+    # None) - run_key is a separate identity just for that.
+    run_key = uuid.uuid4().hex
+    started_at = _now_iso()
+    try:
+        check_run_id = _create_check_run(env, name, started_at)
+    except (urllib.error.URLError, OSError) as exc:
+        # Fork PRs reach here: the token exists (so reporting_enabled() is
+        # true) but check writes are refused with a 403.
+        _notify(f"could not create check run for {name!r} ({exc}); reporting disabled")
+        return _run_unreported(name, command, output_is_sarif=output_is_sarif)
+
+    _append_state(
+        env,
+        {
+            "event": "start",
+            "run_key": run_key,
+            "check_run_id": check_run_id,
+            "name": name,
+            "started_at": started_at,
+        },
+    )
+
+    outcome = _execute(name, command, output_is_sarif=output_is_sarif)
+    if outcome.sarif_text is not None and env.reporting_enabled():
+        _upload_sarif(env, name, outcome.sarif_text, started_at)
+
+    conclusion = "success" if outcome.exit_code == 0 else "failure"
+    # Whether the remote check run actually reached a terminal state. When it
+    # did not, finalize retries it - without that the check run stays
+    # in_progress forever and blocks the pull request.
+    reported = True
     try:
         _complete_check_run(
             env,
             check_run_id,
             name,
             conclusion=conclusion,
-            completed_at=completed_at,
-            exit_code=exit_code,
-            log_tail=log_tail,
+            completed_at=outcome.completed_at,
+            exit_code=outcome.exit_code,
+            log_tail=outcome.log_tail,
         )
     except (urllib.error.URLError, OSError) as exc:
-        _warn(f"could not update check run for {name!r}: {exc}")
+        reported = False
+        _warn(f"could not update check run for {name!r}: {exc}; finalize will retry")
 
     _append_state(
         env,
@@ -405,12 +456,13 @@ def _run_reported(
             "check_run_id": check_run_id,
             "name": name,
             "conclusion": conclusion,
-            "exit_code": exit_code,
-            "duration_s": round(duration, 3),
-            "completed_at": completed_at,
+            "reported": reported,
+            "exit_code": outcome.exit_code,
+            "duration_s": round(outcome.duration_s, 3),
+            "completed_at": outcome.completed_at,
         },
     )
-    return exit_code
+    return outcome.exit_code
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -428,7 +480,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     env = Env.from_os_environ()
     if not env.reporting_enabled():
-        return _run_passthrough(command)
+        return _run_unreported(name, command, output_is_sarif=args.output_is_sarif)
     return _run_reported(env, name, command, output_is_sarif=args.output_is_sarif)
 
 
@@ -484,7 +536,32 @@ def cmd_finalize(args: argparse.Namespace) -> int:
                 except (urllib.error.URLError, OSError) as exc:
                     _warn(f"could not cancel dangling check run for {name!r}: {exc}")
             continue
-        summary_lines.append(f"- {name}: {completion['conclusion']}")
+        conclusion = completion["conclusion"]
+        if not completion.get("reported", True) and check_run_id is not None:
+            # The in-run PATCH failed. Retry the intended conclusion here, or
+            # the check run stays in_progress forever. Older state files have
+            # no "reported" key, hence the True default.
+            try:
+                _api_call(
+                    env,
+                    "PATCH",
+                    f"/check-runs/{check_run_id}",
+                    {
+                        "name": name,
+                        "head_sha": env.head_sha,
+                        "status": "completed",
+                        "conclusion": conclusion,
+                        "completed_at": completion["completed_at"],
+                    },
+                )
+                summary_lines.append(f"- {name}: {conclusion} (completed by finalize)")
+            except (urllib.error.URLError, OSError) as exc:
+                _warn(f"could not complete check run for {name!r}: {exc}")
+                summary_lines.append(
+                    f"- {name}: {conclusion} (check run left in_progress)"
+                )
+            continue
+        summary_lines.append(f"- {name}: {conclusion}")
 
     summary = "\n".join(summary_lines) + "\n"
     step_summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
